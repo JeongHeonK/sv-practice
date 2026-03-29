@@ -2,6 +2,37 @@
 
 ---
 
+## $effect — 사용 전 확인
+
+`$effect`는 탈출구(escape hatch)다. 먼저 대안을 고려한다.
+
+| 상황 | 대안 |
+| -- | -- |
+| 상태 → 상태 동기화 | `$derived` |
+| 버튼 클릭 부수 작업 | 이벤트 핸들러 |
+| 외부 DOM 라이브러리 연동 | `{@attach ...}` |
+| 외부 값 구독 (WebSocket 등) | `createSubscriber` |
+| 반응성 디버깅 | `$inspect` |
+
+또한 effect 안에서 `if (browser) {...}` 로 감싸면 안 된다.
+effect는 서버에서 실행되지 않으므로 그런 조건문이 필요 없다.
+
+```js
+// ✗ 불필요
+$effect(() => {
+  if (browser) {
+    doSomething()
+  }
+})
+
+// ✓ 그냥 바로 사용
+$effect(() => {
+  doSomething()
+})
+```
+
+---
+
 ## $effect 실행 타이밍
 
 `$effect`는 **DOM 업데이트가 적용된 후** 실행된다.
