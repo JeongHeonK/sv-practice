@@ -25,11 +25,26 @@ const { name } = user  // name은 그냥 string → 반응성 없음
 user.name              // 직접 접근해야 추적됨
 ```
 
+### $state.raw — 재할당 전용 큰 객체
+
+`$state`는 객체/배열을 깊게 프록시한다 (깊은 반응성 = 오버헤드).
+재할당만 하고 프로퍼티 뮤테이션은 안 하는 경우 `$state.raw`가 낫다.
+
+```js
+// API 응답 같은 큰 객체 — 통째로 교체만 함
+let data = $state.raw(null)
+
+async function load() {
+  data = await fetch('/api/data').then(r => r.json())  // 재할당 → 감지
+  // data.items.push(...)  // ✗ 뮤테이션은 감지 안됨
+}
+```
+
 ---
 
 ## $derived
 
-다른 상태를 기반으로 계산된 읽기 전용 값.
+다른 상태를 기반으로 계산된 값. 쓰기는 가능하지만 expression이 바뀌면 재계산으로 덮어써진다.
 
 ```js
 let firstName = $state('jh')
@@ -41,14 +56,28 @@ let fullName  = $derived(firstName + ' ' + lastName)
 - **동기적으로 실행** — 상태 변경 직후 즉시 최신값 반영
 - 순수 함수여야 함 (부작용 금지)
 
+### $derived.by — 복잡한 표현식
+
+`$derived`는 표현식(expression)을 받는다. 표현식이 복잡하면 `$derived.by`로 함수를 넘긴다.
+
+```js
+// $derived — 단순 표현식
+let fullName = $derived(firstName + ' ' + lastName)
+
+// $derived.by — 복잡한 로직
+let result = $derived.by(() => {
+  const items = list.filter(x => x.active)
+  return items.map(x => x.value).join(', ')
+})
+```
+
 ### bind:value에 $derived 쓰면 안되는 이유
 
 ```svelte
 <input bind:value={fullName} />  <!-- 잘못된 사용 -->
 ```
 
-- 타이핑하면 DOM 값은 바뀌지만 `fullName`의 실제 reactive state는 변경 안됨
-- 다음 reactive 업데이트 시 `$derived` 재계산으로 덮어써짐
+- 타이핑하면 `fullName`에 값이 쓰이지만, 다음 reactive 업데이트 시 `$derived` expression 재계산으로 덮어써짐
 - `bind:value`는 `$state`에만 사용할 것
 
 ---

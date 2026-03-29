@@ -38,6 +38,56 @@ export default function Button() {
 <button>{label}: {count}</button>
 ```
 
+props는 언제든 바뀔 수 있다. props에 의존하는 값은 `$derived`로 선언해야 한다.
+
+```js
+let { type } = $props()
+
+// ✓ type이 바뀌면 color도 재계산됨
+let color = $derived(type === 'danger' ? 'red' : 'green')
+
+// ✗ type이 바뀌어도 color는 초기값 유지
+let color = type === 'danger' ? 'red' : 'green'
+```
+
+---
+
+## 이벤트 핸들러
+
+`on:click` 같은 레거시 문법 대신 `onclick` 속성을 사용한다.
+
+```svelte
+<!-- ✓ Svelte 5 -->
+<button onclick={() => count++}>click</button>
+
+<!-- ✗ 레거시 (Svelte 4 방식) -->
+<button on:click={() => count++}>click</button>
+```
+
+`window`, `document` 이벤트는 `<svelte:window>`, `<svelte:document>` 사용:
+
+```svelte
+<svelte:window onkeydown={handleKey} />
+<svelte:document onvisibilitychange={handleVisibility} />
+```
+
+---
+
+## Snippets — 재사용 가능한 마크업
+
+컴포넌트 내 반복되는 마크업을 스니펫으로 분리한다.
+
+```svelte
+{#snippet greeting(name)}
+  <p>hello {name}!</p>
+{/snippet}
+
+{@render greeting('world')}
+{@render greeting('svelte')}
+```
+
+스니펫은 props로 전달할 수도 있다.
+
 ---
 
 ## 외부 노출
@@ -48,3 +98,18 @@ export default function Button() {
   export const reset = () => { ... }
 </script>
 ```
+
+---
+
+## Svelte 5 — 레거시 문법 대체표
+
+| 레거시 | Svelte 5 |
+| -- | -- |
+| `export let x` | `let { x } = $props()` |
+| `$$props`, `$$restProps` | `$props()` |
+| `on:click={...}` | `onclick={...}` |
+| `<slot>` | `{#snippet}` + `{@render}` |
+| `<svelte:component this={C}>` | `<C>` |
+| `<svelte:self>` | `import Self from './...'` + `<Self>` |
+| `use:action` | `{@attach ...}` |
+| `class:active={bool}` | `class={[bool && 'active']}` |
