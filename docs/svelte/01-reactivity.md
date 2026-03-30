@@ -86,6 +86,48 @@ lastName  ──→ fullName
 
 ---
 
+## 상태 변경 시 추적 동작 순서
+
+`firstName`이 변경될 때:
+
+```text
+① firstName 변경 → firstName을 구독하는 fullName에게 "재계산 필요" 신호
+
+② fullName → 재계산 필요 표시
+   → fullName을 구독하는 h1 effect에게 "실행 필요" 신호
+
+③ h1 effect 실행 → 스택에 push → [h1 effect]
+
+④ fullName 읽기 → $derived이므로 계산 함수 실행
+   → 스택에 push → [h1 effect, fullName]
+
+⑤ fullName 내부에서 firstName 읽기
+   → $state가 스택 확인 → "맨 위: fullName"
+   → firstName → fullName 의존성 재등록
+
+⑥ fullName 내부에서 lastName 읽기
+   → lastName → fullName 의존성 재등록
+
+⑦ fullName 계산 완료 (새 값 반환) → 스택에서 pop → [h1 effect]
+
+⑧ h1 effect에서 fullName 읽기 완료
+   → $derived가 스택 확인 → "맨 위: h1 effect"
+   → fullName → h1 effect 의존성 재등록
+
+⑨ h1 effect → DOM 업데이트 실행 → 스택에서 pop → []
+```
+
+**결과 의존성 트리 (변경 없음):**
+
+```text
+firstName ──→ fullName ──→ h1 effect
+lastName  ──→ fullName
+```
+
+> 핵심: 매 실행마다 의존성을 **재등록**한다. 덕분에 조건문 등으로 의존성이 바뀌어도 항상 최신 트리를 유지한다.
+
+---
+
 ## 상태 변경 시 동작
 
 ```text
