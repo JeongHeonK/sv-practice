@@ -71,33 +71,134 @@ let color = type === 'danger' ? 'red' : 'green'
 <svelte:document onvisibilitychange={handleVisibility} />
 ```
 
----
+### 네이티브 이벤트 전달
 
-## Snippets — 재사용 가능한 마크업
-
-컴포넌트 내 반복되는 마크업을 스니펫으로 분리한다.
+rest props spread를 사용하면 `onclick` 등 네이티브 이벤트가 자동으로 내부 요소에 전달된다.
+`HTMLButtonAttributes`에 이벤트 타입이 포함되어 있어 자동완성도 동작한다.
 
 ```svelte
-{#snippet greeting(name)}
-  <p>hello {name}!</p>
-{/snippet}
-
-{@render greeting('world')}
-{@render greeting('svelte')}
+<!-- 사용하는 쪽 — 별도 작업 없이 바로 전달됨 -->
+<Button onclick={() => alert('clicked')}>전송</Button>
 ```
 
-스니펫은 props로 전달할 수도 있다.
+### 커스텀 이벤트 — 함수 prop
 
----
-
-## 외부 노출
+Svelte 5에서 커스텀 이벤트는 그냥 함수 prop이다. `createEventDispatcher` 불필요.
 
 ```svelte
-<script>
-  // 외부에서 접근 가능한 값/함수 노출
-  export const reset = () => { ... }
+<!-- Button.svelte -->
+<script lang="ts">
+  type Props = HTMLButtonAttributes & {
+    left?: Snippet<[boolean]>
+    children: Snippet
+    onleftmouseover?: () => void  // 커스텀 이벤트 = 함수 prop
+  }
+
+  let { left, children, onleftmouseover, ...restProps }: Props = $props()
 </script>
+
+<button {...restProps}>
+  {#if left}
+    <div
+      role="presentation"
+      onmouseenter={() => {
+        isLeftHovered = true
+        onleftmouseover?.()  <!-- 옵셔널이므로 ?. 로 호출 -->
+      }}
+    >
+      {@render left(isLeftHovered)}
+    </div>
+  {/if}
+  {@render children()}
+</button>
 ```
+
+```svelte
+<!-- 사용하는 쪽 -->
+<Button onleftmouseover={() => console.log('left hovered')}>검색</Button>
+```
+
+| | Svelte 4 | Svelte 5 |
+|--|--|--|
+| 커스텀 이벤트 | `createEventDispatcher()` + `dispatch('event')` | 함수 prop |
+| 사용 | `on:event={handler}` | `onevent={handler}` |
+
+### 이벤트 버블링과 캡처
+
+이벤트는 기본적으로 안쪽 → 바깥쪽(버블링)으로 전파된다.
+
+```svelte
+<div onclick={() => console.log('div')}>
+  <button onclick={(e) => {
+    console.log('button')
+    e.stopPropagation()  // div까지 전파 차단
+  }}>
+    클릭
+  </button>
+</div>
+<!-- 출력: button -->
+```
+
+캡처는 바깥쪽 → 안쪽 순서. Svelte에서는 이벤트명에 `capture` 붙이면 된다.
+
+```svelte
+<!-- 일반 JS: addEventListener('click', fn, { capture: true }) -->
+<!-- Svelte: onclickcapture -->
+<div onclickcapture={(e) => {
+  console.log('div 먼저')
+  e.stopPropagation()  // button 이벤트 실행 안 됨
+}}>
+  <button onclick={() => console.log('button')}>클릭</button>
+</div>
+<!-- 출력: div 먼저 -->
+```
+
+### 이벤트 위임 (Event Delegation)
+
+Svelte는 성능을 위해 이벤트 리스너를 해당 요소가 아닌 **루트 요소**에 등록한다.
+DevTools에서 버튼을 검사하면 버튼에 직접 리스너가 없고 루트에 붙어있는 걸 볼 수 있다.
+개발 시에는 신경 쓸 필요 없다.
+
+---
+
+## 외부 노출 — bind:this + export const
+
+컴포넌트 내부 HTML 요소에 프로그래밍 방식으로 접근할 때 사용한다.
+`bind:this`로 내부 요소 참조를 잡고, `export const`로 외부에 함수를 노출한다.
+
+```svelte
+<!-- Button.svelte -->
+<script lang="ts">
+  let button = $state<HTMLButtonElement>()
+
+  // 외부에 노출할 함수
+  export const focus = () => button?.focus()
+  export const getButton = () => button  // 요소 자체를 반환
+</script>
+
+<button bind:this={button} {...restProps}>
+  {@render children()}
+</button>
+```
+
+```svelte
+<!-- 사용하는 쪽 -->
+<script lang="ts">
+  import Button from './Button.svelte'
+
+  let btn: ReturnType<typeof Button>  // 컴포넌트 타입 — export한 함수 자동완성 가능
+
+  $effect(() => {
+    btn.focus()               // export한 함수 호출
+    btn.getButton()?.click()  // 요소 자체를 받아 DOM 메서드 직접 호출
+  })
+</script>
+
+<Button bind:this={btn}>클릭</Button>
+```
+
+> `bind:this`를 컴포넌트에 사용하면 해당 컴포넌트가 `export`한 값/함수에 접근할 수 있다.
+> HTML 요소에 `bind:this`를 사용하면 DOM 요소 자체를 참조한다.
 
 ---
 
