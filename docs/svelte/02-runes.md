@@ -25,6 +25,52 @@ const { name } = user  // name은 그냥 string → 반응성 없음
 user.name              // 직접 접근해야 추적됨
 ```
 
+### $state 내부 동작 — Proxy 기반 반응성
+
+`$state`에 객체/배열을 넘기면 내부적으로 `Proxy`로 감싼다.
+
+```js
+let user = $state({ name: 'jh', age: 20 })
+// 실제로는 new Proxy(target, handler) 생성
+
+user.name = 'kim'     // → set 트랩 호출 → 의존성 재실행
+console.log(user.age) // → get 트랩 호출 → 이 코드가 속한 effect/derived를 의존성으로 등록
+```
+
+- **get 트랩**: 프로퍼티를 읽을 때 현재 실행 중인 `$effect`/`$derived`를 의존성으로 등록
+- **set 트랩**: 프로퍼티에 값을 쓸 때 등록된 의존성들을 재실행
+- 중첩 객체도 프록시 체인으로 감싸서 깊은 반응성 제공
+
+```js
+let state = $state({ user: { address: { city: 'Seoul' } } })
+state.user.address.city = 'Busan'  // 중첩 프록시 체인으로 감지됨
+```
+
+기본값(string, number, boolean)은 프록시 불가 → 변수 재할당만 감지.
+
+### 세분화된 반응성 (Granular Reactivity)
+
+프록시 덕분에 의존성은 **객체/배열 전체가 아닌 프로퍼티 단위**로 등록된다.
+
+```js
+let obj = $state({ name: 'jh', address: { city: 'Seoul' } })
+let arr = $state([10, 20, 30])
+
+// obj.name에만 의존하는 effect
+$effect(() => { console.log(obj.name) })
+
+obj.address.city = 'Busan'  // → 위 effect 재실행 안됨 (name 안 건드림)
+obj.name = 'kim'            // → 위 effect 재실행됨
+
+// arr[0]에만 의존하는 effect
+$effect(() => { console.log(arr[0]) })
+
+arr[1] = 99  // → 위 effect 재실행 안됨
+arr[0] = 99  // → 위 effect 재실행됨
+```
+
+변경된 프로퍼티에 의존하는 effect/마크업만 재실행 → 불필요한 렌더링 없음.
+
 ### $state.raw — 재할당 전용 큰 객체
 
 `$state`는 객체/배열을 깊게 프록시한다 (깊은 반응성 = 오버헤드).
@@ -167,15 +213,23 @@ $effect(() => {
 
 ### untrack — 의존성 추적 제외
 
-배열에 push할 때 배열을 읽으므로 의존성이 자동 등록된다. 의도치 않은 루프 발생 가능.
+배열에 push할 때 무한루프가 발생하는 이유는 `push` 내부 동작 때문이다.
+
+`array.push(x)`는 내부적으로:
+1. `array.length` **읽기** (get 트랩) → effect를 `length` 의존성으로 등록
+2. `array[length] = x` 쓰기
+3. `array.length` **쓰기** (set 트랩) → `length` 의존성인 effect 재실행
+
+즉 push 하나가 `length`를 읽고 쓰므로, effect 안에서 push하면 자기 자신을 트리거한다.
 
 ```js
 let num = $state(5)
 let history = $state<number[]>([])
 
-// ✗ 무한루프 — history를 읽고(push) + 쓰므로 의존성 등록됨
+// ✗ 무한루프
+// push → length 읽음(의존성 등록) → length 씀(effect 재실행) → push → ...
 $effect(() => {
-  history.push(num)  // num 변경 → effect 실행 → history 변경 → effect 재실행 → ...
+  history.push(num)
 })
 ```
 
@@ -253,3 +307,83 @@ let history = $state([untrack(() => num)])
 ```
 
 초기값은 한 번만 사용되므로 추적할 의도가 없음을 `untrack`으로 명시.
+
+---
+
+## 디버깅 유틸리티
+
+### $state.snapshot — 프록시 없는 순수 객체
+
+`$state` 객체는 Proxy라서 외부 API/라이브러리에 넘기면 문제가 될 수 있다.
+`$state.snapshot()`으로 프록시를 벗긴 순수 JS 객체를 얻는다.
+
+```js
+let user = $state({ name: 'jh', address: { city: 'Seoul' } })
+
+// ✗ Proxy 객체 — 외부 라이브러리에 넘기면 예상치 못한 동작
+console.log(user)
+
+// ✓ 순수 객체 스냅샷
+console.log($state.snapshot(user))
+```
+
+### $inspect — 상태 변경 자동 로깅 (개발 전용)
+
+`$effect`로 로깅하면 객체 전체에 의존해 세분화된 변경을 못 잡는다.
+`$inspect`는 내부 프로퍼티 단위까지 추적해 변경될 때마다 자동으로 기록한다.
+
+```js
+// $effect 방식 — object 자체가 바뀌지 않으면 실행 안됨
+$effect(() => { console.log(object) })  // object.name 변경 시 실행 안됨
+
+// $inspect 방식 — 중첩 프로퍼티 변경도 감지
+$inspect(object)  // object.name, object.address.city 등 변경 시 모두 로깅
+```
+
+- 개발 빌드에서만 실행, 프로덕션에서는 동작 안함
+- 스냅샷(프록시 제거된 값)을 출력
+
+#### .with() — 커스텀 로깅 함수
+
+```js
+// 기본: console.log
+$inspect(object)
+
+// 스택 트레이스 포함
+$inspect(object).with(console.trace)
+
+// 커스텀 처리
+$inspect(object).with((type, value) => {
+  if (type === 'update') sendToMonitoring(value)
+})
+```
+
+### $inspect.trace() — effect 재실행 원인 추적
+
+effect 안에서 사용하면 **어떤 상태 변경이 이 effect를 재실행시켰는지** 출력한다.
+
+```js
+$effect(() => {
+  $inspect.trace()  // 재실행 원인이 된 상태를 콘솔에 강조 표시
+  console.log(object.name)
+  console.log(object.address.city)
+})
+// name 변경 시 → name이 원인임을 표시
+// city 변경 시 → city가 원인임을 표시
+```
+
+### {@debug} — 마크업 중단점
+
+마크업에서 값이 변경될 때마다 DevTools 중단점을 트리거한다.
+
+```svelte
+<!-- 특정 변수 변경 시 중단 -->
+{@debug object, arr}
+
+<!-- 인수 없이 — 컴포넌트 상태 변경 시마다 중단 -->
+{@debug}
+```
+
+- DevTools가 열려 있을 때만 중단점 동작
+- 콘솔에도 현재 값 출력
+- 개발 시에만 사용, 커밋 전 제거할 것
