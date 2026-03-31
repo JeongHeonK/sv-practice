@@ -1,20 +1,17 @@
-# $effect 실전 예제 — 카운터
+# $effect 실전 — setInterval 패턴
 
-`setInterval` + 클린업으로 `$effect` 핵심 패턴을 익히는 예제.
+`$effect` + 클린업의 핵심 패턴을 익히는 예제.
 
 ---
 
-## 기본 구조
+## 기본: 자동 카운터
 
 ```svelte
 <script lang="ts">
   let count = $state(0)
 
   $effect(() => {
-    const interval = setInterval(() => {
-      count++
-    }, 1000)
-
+    const interval = setInterval(() => count++, 1000)
     return () => clearInterval(interval)  // 클린업 필수
   })
 </script>
@@ -22,12 +19,13 @@
 <h1>{count}</h1>
 ```
 
-클린업 없으면 effect 재실행 시 이전 interval이 남아 interval이 누적되고
-count가 1초마다 여러 번 증가한다.
+클린업 없으면 effect 재실행 시 이전 interval이 남아 count가 가속된다.
 
 ---
 
-## 동적 주기 — frequency 상태를 의존성으로
+## 의존성에 의한 재생성
+
+`frequency`를 의존성으로 사용하면 값이 바뀔 때 interval이 자동으로 재생성된다.
 
 ```svelte
 <script lang="ts">
@@ -35,10 +33,8 @@ count가 1초마다 여러 번 증가한다.
   let frequency = $state(1000)
 
   $effect(() => {
-    const interval = setInterval(() => {
-      count++  // ← setInterval 콜백 내부 = 비동기 → 의존성 미등록
-    }, frequency)  // ← frequency는 동기적으로 읽힘 → 의존성 등록
-
+    const interval = setInterval(() => count++, frequency)
+    //                                          ↑ 동기 구간에서 읽힘 → 의존성 등록
     return () => clearInterval(interval)
   })
 </script>
@@ -47,31 +43,20 @@ count가 1초마다 여러 번 증가한다.
 <button onclick={() => frequency /= 2}>빠르게</button>
 ```
 
-### 비동기 콜백 내부는 의존성 추적 안 됨
+### 왜 count는 의존성이 안 되나?
+
+`setInterval` 콜백은 **비동기**로 실행된다. effect의 동기 실행 구간이 끝난 후 호출되므로 의존성으로 등록되지 않는다.
 
 ```text
-effect 실행 (동기 구간)
-  ↓
-frequency 읽기 → 스택 확인 → 의존성 등록 ✓
-  ↓
-setInterval 등록 (콜백은 나중에 실행)
-  ↓
-effect 완료 → 스택 pop
+effect 실행 (동기) → frequency 읽기 → 의존성 등록 ✓ → effect 완료
 
 --- 1초 후 ---
-setInterval 콜백 실행 (비동기)
-  → 스택 비어있음
-  → count 읽기/쓰기 → 의존성 등록 안됨 ✗
+setInterval 콜백 (비동기) → count++ → 의존성 등록 ✗ (스택 비어있음)
 ```
-
-`setInterval` 콜백 안에서 `count`를 읽어도 의존성으로 등록되지 않는다.
-effect가 `count` 변경 시 재실행되지 않으므로 interval이 한 번만 생성된다.
 
 ---
 
-## 일시정지 / 재생
-
-`paused` 상태를 effect 의존성으로 만들어 effect 재실행을 트리거한다.
+## 일시정지/재생
 
 ```svelte
 <script lang="ts">
@@ -80,63 +65,32 @@ effect가 `count` 변경 시 재실행되지 않으므로 interval이 한 번만
   let paused = $state(false)
 
   $effect(() => {
-    if (paused) return  // paused가 의존성으로 등록됨
+    if (paused) return  // paused 읽음 → 의존성 등록
 
-    const interval = setInterval(() => {
-      count++
-    }, frequency)
-
+    const interval = setInterval(() => count++, frequency)
     return () => clearInterval(interval)
   })
 </script>
-
-<button onclick={() => paused = !paused}>
-  {paused ? '재생' : '일시정지'}
-</button>
 ```
 
-- 일시정지 클릭 → `paused = true` → effect 재실행 → 클린업 실행 → interval 제거
-- 재생 클릭 → `paused = false` → effect 재실행 → 새 interval 생성
+- `paused = true` → effect 재실행 → `return` → 클린업으로 interval 제거
+- `paused = false` → effect 재실행 → 새 interval 생성
 
 ---
 
-## 리셋 — effect 강제 재실행 트릭
+## effect보다 이벤트 핸들러가 나은 경우
 
-리셋 시 interval을 새로 만들고 싶다면 effect를 강제로 재실행해야 한다.
-의존성 값을 바꿔야 재실행되므로, 임시값 → 원래값 순으로 변경하는 트릭을 사용한다.
-
-```js
-function reset() {
-  count = 0
-
-  // effect 강제 재실행: 임시값으로 변경 → 클린업 실행 → 원래값 복구 → 재생성
-  const original = frequency
-  frequency = 0           // 값 변경 → effect 클린업 실행
-  frequency = original    // 원래값 복구 → effect 재실행 → interval 새로 생성
-}
-```
-
-다소 hacky한 방법이다. 더 깔끔한 대안은 아래를 참고.
-
----
-
-## 결론 — effect vs 이벤트 핸들러
-
-이 카운터 예제처럼 버튼 클릭으로 interval을 직접 제어해야 하는 경우,
-effect 없이 이벤트 핸들러에서 직접 처리하는 게 더 명확하다.
+위 예제처럼 버튼으로 직접 제어하는 경우, effect 없이 이벤트 핸들러가 더 명확하다.
 
 ```js
-// effect 없이 직접 제어
 let intervalId: ReturnType<typeof setInterval>
 
 function start() {
   intervalId = setInterval(() => count++, frequency)
 }
-
 function pause() {
   clearInterval(intervalId)
 }
-
 function reset() {
   clearInterval(intervalId)
   count = 0
@@ -144,10 +98,9 @@ function reset() {
 }
 ```
 
-| | `$effect` 방식 | 이벤트 핸들러 방식 |
+| | `$effect` | 이벤트 핸들러 |
 | -- | -- | -- |
 | interval 생명주기 | 의존성 변경에 묶임 | 직접 제어 |
-| 강제 재실행 | 임시값 트릭 필요 | 그냥 함수 호출 |
-| 적합한 경우 | 외부 라이브러리 연동 | 버튼으로 직접 제어 |
+| 적합한 경우 | 상태 변화에 자동 반응 | 사용자 액션에 직접 반응 |
 
-**effect를 쓰려 할 때 "이벤트 핸들러로 해결 안 되나?" 먼저 고민할 것.**
+**"$effect를 쓰기 전에 이벤트 핸들러로 해결되지 않는지 먼저 생각하자."**

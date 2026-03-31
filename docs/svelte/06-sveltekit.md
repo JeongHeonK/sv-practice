@@ -1,27 +1,33 @@
-# SvelteKit
+# SvelteKit — Next.js와 비교
 
-## hooks 파일
+## 핵심 대응표
 
-파일명은 반드시 `hooks`여야 한다. SvelteKit이 약속된 이름만 인식한다.
+| Next.js | SvelteKit | 설명 |
+| -- | -- | -- |
+| `middleware.ts` | `hooks.server.ts` | 모든 요청 가로채기 |
+| `layout.tsx` | `+layout.svelte` | 공유 레이아웃 |
+| `page.tsx` | `+page.svelte` | 페이지 컴포넌트 |
+| `getServerSideProps` | `+page.server.ts` (load) | 서버 데이터 로딩 |
+| `error.tsx` | `+error.svelte` | 에러 페이지 |
 
-### hooks.server.ts
+---
 
-모든 서버 요청이 여기를 먼저 통과한다.
+## hooks.server.ts — Next.js의 middleware
+
+모든 서버 요청이 여기를 먼저 통과한다. 인증 체크, `event.locals`에 데이터 주입 등.
 
 ```ts
 import type { Handle } from '@sveltejs/kit'
 
 export const handle: Handle = async ({ event, resolve }) => {
-  // 인증 토큰 검사
-  // event.locals에 데이터 주입
-  // 특정 경로 접근 차단
+  // 인증 토큰 검사, event.locals에 유저 정보 주입 등
   return resolve(event)
 }
 ```
 
-### hooks.ts
+### hooks.ts — 공용 에러 처리
 
-주로 클라이언트 에러 처리.
+서버 + 클라이언트 모두에서 실행.
 
 ```ts
 export const handleError = ({ error }) => {
@@ -30,67 +36,39 @@ export const handleError = ({ error }) => {
 }
 ```
 
-### 비교
-
-| | `hooks.ts` | `hooks.server.ts` |
-| -- | -- | -- |
-| 실행 환경 | 서버 + 클라이언트 | 서버만 |
-| 주 용도 | 에러 처리 | 요청 가로채기, 인증 |
-
----
-
-## 컴포넌트 script vs hooks
-
-| | hooks | 컴포넌트 script |
-| -- | -- | -- |
-| 적용 범위 | 앱 전체 | 해당 컴포넌트만 |
-| 실행 시점 | 요청/에러 발생 시 | 컴포넌트 마운트 시 |
-| 인스턴스 | 1개 | 컴포넌트 수만큼 |
-
-모든 페이지에 반복 작성하기 싫은 공통 로직 → hooks
-
 ---
 
 ## 폴더별 공통 로직 — +layout.server.ts
 
-hooks는 `src/` 루트에만 위치 가능. 폴더별 공통 로직은 `+layout.server.ts`로.
+Next.js의 `layout.tsx`에서 서버 로직을 분리한 형태. 폴더 기준으로 하위 페이지에 적용.
 
 ```text
 src/routes/
-├── +layout.server.ts        ← 전체 공통 로직
+├── +layout.server.ts           ← 전체 공통
 ├── admin/
-│   ├── +layout.server.ts    ← /admin/* 공통 로직 (관리자 권한 체크 등)
+│   ├── +layout.server.ts       ← /admin/* 공통 (권한 체크)
 │   └── +page.svelte
 └── dashboard/
-    ├── +layout.server.ts    ← /dashboard/* 공통 로직
+    ├── +layout.server.ts       ← /dashboard/* 공통
     └── +page.svelte
 ```
 
 ```ts
 // src/routes/admin/+layout.server.ts
 export const load = async ({ locals }) => {
-  if (!locals.user?.isAdmin) {
-    redirect(302, '/')
-  }
+  if (!locals.user?.isAdmin) redirect(302, '/')
 }
 ```
 
 ### 요청 흐름
 
 ```text
-브라우저 요청
-    ↓
-hooks.server.ts (handle)   ← 모든 요청 통과
-    ↓
-+layout.server.ts (load)
-    ↓
-+page.server.ts (load)
-    ↓
-응답
+요청 → hooks.server.ts → +layout.server.ts → +page.server.ts → 응답
+       (미들웨어)         (레이아웃 load)       (페이지 load)
 ```
 
 | 파일 | 범위 |
 | -- | -- |
-| `src/hooks.server.ts` | 앱 전체 모든 요청 |
-| `src/routes/+layout.server.ts` | 전체 페이지 load 시 |
-| `src/routes/admin/+layout.server.ts` | /admin/* 페이지만 |
+| `hooks.server.ts` | 앱 전체 모든 요청 |
+| `+layout.server.ts` | 해당 폴더 하위 페이지 |
+| `+page.server.ts` | 해당 페이지만 |

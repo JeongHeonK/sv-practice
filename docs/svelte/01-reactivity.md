@@ -1,20 +1,32 @@
-# 신호 기반 반응성 (Signal-based Reactivity)
+# 반응성 — React에서 Svelte로 멘탈 모델 전환
 
-## Svelte vs React
+## 핵심 차이: "다시 실행" vs "연결"
+
+React는 상태가 바뀌면 **컴포넌트 함수 전체를 다시 실행**하고 Virtual DOM을 비교한다.
+Svelte는 상태가 바뀌면 **그 상태에 연결된 DOM만 직접 업데이트**한다.
+
+```text
+React:   setState → 컴포넌트 함수 재실행 → VDOM diff → DOM 패치
+Svelte:  $state 변경 → 연결된 effect만 재실행 → DOM 직접 업데이트
+```
 
 | | React | Svelte |
 | -- | -- | -- |
-| 방식 | 컴포넌트 함수 전체 재실행 후 Virtual DOM 비교 | 의존성 연결된 곳만 직접 DOM 업데이트 |
+| 업데이트 단위 | 컴포넌트 전체 | 변경된 상태에 연결된 곳만 |
 | Virtual DOM | 있음 | 없음 |
-| 런타임 | 브라우저에 React 라이브러리 필요 | 컴파일 결과물(바닐라 JS)만 있으면 됨 |
-| 의존성 추적 | `useMemo`, `useCallback` 등으로 직접 명시 | 자동 추적 |
+| 의존성 추적 | `useMemo`, `useCallback`으로 수동 명시 | 자동 추적 |
+| 런타임 | React 라이브러리 필요 | 컴파일된 바닐라 JS만 실행 |
 
-Svelte는 **컴파일러**다. `.svelte` 파일을 바닐라 JS/CSS로 변환하고, 브라우저는 그 결과물만 실행한다.
+> **멘탈 모델 전환**: React에서는 "렌더링 함수가 다시 호출된다"고 생각한다. Svelte에서는 "상태와 DOM 사이에 전선이 연결되어 있다"고 생각하면 된다.
+
+---
+
+## Svelte는 컴파일러다
+
+`.svelte` 파일을 빌드 시점에 바닐라 JS/CSS로 변환한다. 브라우저는 Svelte를 모른다.
 
 ```text
-개발 시          빌드 시            런타임
-.svelte   →  컴파일러  →  .js/.css  →  브라우저에서 실행
-(Svelte 문법)           (바닐라 JS)    (Svelte 런타임 없음)
+.svelte  →  컴파일러  →  .js/.css  →  브라우저 실행
 ```
 
 ---
@@ -22,144 +34,83 @@ Svelte는 **컴파일러**다. `.svelte` 파일을 바닐라 JS/CSS로 변환하
 ## 3가지 핵심 개념
 
 ```text
-$state    → 읽기/쓰기 가능한 소스 (신호)
-$derived  → 소스 기반 계산값 (읽기 전용)
-effect    → DOM 업데이트 등 부작용 실행
+$state    →  값이 바뀌면 알림을 보내는 소스
+$derived  →  소스가 바뀌면 자동 재계산되는 값
+effect    →  소스가 바뀌면 자동 재실행되는 부작용 (DOM 업데이트 등)
+```
+
+React로 비유하면:
+
+```text
+$state   ≈  useState (하지만 setter 함수 없이 직접 변경)
+$derived ≈  useMemo  (하지만 의존성 배열 없이 자동 추적)
+effect   ≈  useEffect (하지만 의존성 배열 없이 자동 추적)
 ```
 
 ---
 
-## 의존성 자동 추적 원리 — 파생 스택
+## 의존성 자동 추적 원리
 
-**핵심 트릭**: `$state` 값을 읽을 때 "지금 누가 실행 중인지" 체크한다.
+**핵심 트릭**: `$state` 값을 **읽는 순간** "지금 누가 실행 중인지" 체크해서 의존성을 등록한다.
 
-```text
-파생 스택 = 현재 실행 중인 effect/derived를 담는 임시 통
-```
-
-### h1 effect는 어디서?
-
-Svelte 컴파일러가 템플릿을 자동으로 effect로 변환한다.
+컴파일러가 템플릿을 자동으로 effect로 변환한다:
 
 ```svelte
-<!-- 내가 작성한 코드 -->
-<h1>Welcome {fullName}</h1>
+<!-- 내가 쓴 코드 -->
+<h1>{fullName}</h1>
 ```
 
 ```js
-// Svelte가 내부적으로 생성 (개념적)
+// 컴파일러가 내부적으로 생성 (개념적)
 effect(() => {
-  h1.textContent = 'Welcome ' + fullName
+  h1.textContent = fullName
 })
 ```
 
-### 의존성 추적 동작 순서
+### 추적 과정
 
 ```text
-① h1 effect 실행 → 스택에 push → [h1 effect]
+① effect 실행 → fullName 읽기
+② fullName은 $derived → firstName, lastName 읽기
+③ 각 $state가 "fullName이 나를 읽었다" 기록
+④ fullName이 "h1 effect가 나를 읽었다" 기록
 
-② fullName 읽기 → $derived이므로 계산 함수 실행
-   → 스택에 push → [h1 effect, fullName]
-
-③ fullName 내부에서 firstName 읽기
-   → $state가 스택 확인 → "맨 위: fullName"
-   → firstName → fullName 의존성 등록
-
-④ fullName 내부에서 lastName 읽기
-   → lastName → fullName 의존성 등록
-
-⑤ fullName 계산 완료 → 스택에서 pop → [h1 effect]
-
-⑥ h1 effect에서 fullName 읽기 완료
-   → $derived가 스택 확인 → "맨 위: h1 effect"
-   → fullName → h1 effect 의존성 등록
-
-⑦ h1 effect 완료 → 스택에서 pop → []
-```
-
-**결과 의존성 트리:**
-
-```text
-firstName ──→ fullName ──→ h1 effect
+결과:
+firstName ──→ fullName ──→ h1 effect (DOM 업데이트)
 lastName  ──→ fullName
 ```
 
----
-
-## 상태 변경 시 추적 동작 순서
-
-`firstName`이 변경될 때:
-
-```text
-① firstName 변경 → firstName을 구독하는 fullName에게 "재계산 필요" 신호
-
-② fullName → 재계산 필요 표시
-   → fullName을 구독하는 h1 effect에게 "실행 필요" 신호
-
-③ h1 effect 실행 → 스택에 push → [h1 effect]
-
-④ fullName 읽기 → $derived이므로 계산 함수 실행
-   → 스택에 push → [h1 effect, fullName]
-
-⑤ fullName 내부에서 firstName 읽기
-   → $state가 스택 확인 → "맨 위: fullName"
-   → firstName → fullName 의존성 재등록
-
-⑥ fullName 내부에서 lastName 읽기
-   → lastName → fullName 의존성 재등록
-
-⑦ fullName 계산 완료 (새 값 반환) → 스택에서 pop → [h1 effect]
-
-⑧ h1 effect에서 fullName 읽기 완료
-   → $derived가 스택 확인 → "맨 위: h1 effect"
-   → fullName → h1 effect 의존성 재등록
-
-⑨ h1 effect → DOM 업데이트 실행 → 스택에서 pop → []
-```
-
-**결과 의존성 트리 (변경 없음):**
-
-```text
-firstName ──→ fullName ──→ h1 effect
-lastName  ──→ fullName
-```
-
-> 핵심: 매 실행마다 의존성을 **재등록**한다. 덕분에 조건문 등으로 의존성이 바뀌어도 항상 최신 트리를 유지한다.
-
----
-
-## 상태 변경 시 동작
+### 상태 변경 시
 
 ```text
 firstName 변경
-    ↓
-fullName → 재계산 필요 표시
-    ↓
-fullName 재계산 → 값이 달라짐?
-    ├── 같음  → h1 effect 실행 안함 (최적화)
-    └── 다름  → h1 effect 실행 → DOM 업데이트
+  → fullName 재계산 → 값이 달라졌으면 → h1 effect 재실행 → DOM 업데이트
+                    → 값이 같으면   → h1 effect 스킵 (최적화)
 ```
+
+> **React와 차이**: React는 `useMemo(fn, [dep1, dep2])`처럼 의존성을 수동으로 나열한다. Svelte는 코드를 실행하면서 실제로 읽은 값만 자동으로 추적한다. 의존성 배열이 없다.
 
 ---
 
-## 동적 의존성 트리
+## 동적 의존성
 
-조건문에 따라 런타임에 의존성 트리가 바뀐다.
+매 실행마다 의존성을 **다시 수집**하므로, 조건문에 따라 의존성 트리가 바뀔 수 있다.
 
 ```js
-// userId가 있으면 fullName 코드에 도달하지 않음
 $effect(() => {
   console.log(userId || fullName)
 })
 ```
 
 ```text
-userId 없을 때:              userId 있을 때:
-
-firstName → fullName         fullName → 아무도 안 씀 (실행 안함)
-lastName  → fullName
-fullName  → effect           userId → effect
-userId    → effect
+userId가 있을 때: userId만 추적 (fullName은 읽히지 않으니까)
+userId가 없을 때: userId + fullName 모두 추적
 ```
 
-**아무 effect도 안 쓰는 `$derived`는 재계산 자체를 건너뜀** — Lazy evaluation.
+React의 `useEffect`는 의존성 배열이 고정이지만, Svelte는 실행 경로에 따라 자동으로 달라진다.
+
+---
+
+## Lazy evaluation
+
+아무 effect도 읽지 않는 `$derived`는 재계산 자체를 건너뛴다. 사용되지 않는 계산은 비용이 0이다.

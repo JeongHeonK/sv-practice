@@ -1,252 +1,162 @@
 # 컴포넌트
 
-## .svelte 파일 = 컴포넌트
+## 파일 = 컴포넌트
 
-파일 자체가 컴포넌트다. 별도 export 없이 import하면 바로 사용 가능.
-
-```jsx
-// React — 함수 정의 + export 필요
-export default function Button() {
-  return <button>click</button>
-}
-```
+React는 함수를 정의하고 export한다. Svelte는 `.svelte` 파일 자체가 컴포넌트다.
 
 ```svelte
-<!-- Svelte — 파일 자체가 컴포넌트 -->
+<!-- Button.svelte — 이것만으로 컴포넌트 완성 -->
 <button>click</button>
 ```
 
 ```svelte
-<!-- 사용할 때 -->
 <script>
   import Button from './Button.svelte'
 </script>
-
 <Button />
 ```
 
 ---
 
-## Props
+## Props — $props()
+
+React의 함수 파라미터 대신 `$props()` rune을 사용한다.
 
 ```svelte
 <script>
-  // props 받기
+  // React:  function Button({ label, count = 0 }) { ... }
+  // Svelte:
   let { label, count = 0 } = $props()
 </script>
 
 <button>{label}: {count}</button>
 ```
 
-props는 언제든 바뀔 수 있다. props에 의존하는 값은 `$derived`로 선언해야 한다.
+### 핵심 규칙: props 의존 값은 $derived
+
+Svelte 스크립트는 **한 번만 실행**된다. React처럼 함수가 다시 호출되지 않는다.
 
 ```js
 let { type } = $props()
 
-// ✓ type이 바뀌면 color도 재계산됨
-let color = $derived(type === 'danger' ? 'red' : 'green')
-
-// ✗ type이 바뀌어도 color는 초기값 유지
-let color = type === 'danger' ? 'red' : 'green'
+let color = $derived(type === 'danger' ? 'red' : 'green')  // ✓ 재계산됨
+let color = type === 'danger' ? 'red' : 'green'            // ✗ 초기값 고정
 ```
+
+### 구조분해 후 파생값 버그
+
+`$props()`에서 꺼낸 객체를 다시 구조분해하면 반응성이 끊긴다.
+
+```js
+// ✗ notification이 바뀌어도 title/body는 초기값
+let { title, body } = $props<{ notification: Notification }>().notification
+
+// ✓ 해결 — 객체로 받아서 직접 접근하거나 $derived
+let { notification } = $props()
+let title = $derived(notification.title)
+```
+
+---
+
+## $bindable — 양방향 바인딩
+
+React에서는 `onChange` 콜백으로 상태를 올려보낸다. Svelte는 `$bindable`로 자식이 부모 상태를 직접 변경할 수 있다.
+
+```svelte
+<!-- Child.svelte -->
+<script>
+  let { value = $bindable('') } = $props()
+</script>
+<input bind:value />
+```
+
+```svelte
+<!-- Parent.svelte -->
+<Child bind:value={myValue} />
+```
+
+`$bindable` 없이 부모 소유 상태를 자식이 변경하면 ownership 경고가 발생한다.
+
+**콜백 vs $bindable**: 부모가 업데이트 로직을 제어하려면 콜백, 자식이 내부적으로 관리하면 `$bindable`.
 
 ---
 
 ## 이벤트 핸들러
 
-`on:click` 같은 레거시 문법 대신 `onclick` 속성을 사용한다.
+`on:click` (Svelte 4)이 아니라 `onclick` (네이티브 속성)을 사용한다.
 
 ```svelte
-<!-- ✓ Svelte 5 -->
 <button onclick={() => count++}>click</button>
 
-<!-- ✗ 레거시 (Svelte 4 방식) -->
-<button on:click={() => count++}>click</button>
-```
-
-`window`, `document` 이벤트는 `<svelte:window>`, `<svelte:document>` 사용:
-
-```svelte
+<!-- window/document 이벤트 -->
 <svelte:window onkeydown={handleKey} />
-<svelte:document onvisibilitychange={handleVisibility} />
 ```
 
-### 네이티브 이벤트 전달
+### 커스텀 이벤트 = 함수 prop
 
-rest props spread를 사용하면 `onclick` 등 네이티브 이벤트가 자동으로 내부 요소에 전달된다.
-`HTMLButtonAttributes`에 이벤트 타입이 포함되어 있어 자동완성도 동작한다.
-
-```svelte
-<!-- 사용하는 쪽 — 별도 작업 없이 바로 전달됨 -->
-<Button onclick={() => alert('clicked')}>전송</Button>
-```
-
-### 커스텀 이벤트 — 함수 prop
-
-Svelte 5에서 커스텀 이벤트는 그냥 함수 prop이다. `createEventDispatcher` 불필요.
+React와 동일하게 함수를 prop으로 넘긴다. `createEventDispatcher`는 레거시.
 
 ```svelte
-<!-- Button.svelte -->
+<!-- Child.svelte -->
 <script lang="ts">
-  type Props = HTMLButtonAttributes & {
-    left?: Snippet<[boolean]>
-    children: Snippet
-    onleftmouseover?: () => void  // 커스텀 이벤트 = 함수 prop
-  }
+  let { onsubmit }: { onsubmit?: (value: string) => void } = $props()
+</script>
+<button onclick={() => onsubmit?.('hello')}>전송</button>
+```
 
-  let { left, children, onleftmouseover, ...restProps }: Props = $props()
+### 네이티브 속성 전달 — rest props
+
+`disabled`, `aria-*` 등은 자동으로 전달되지 않는다. rest props + spread로 해결.
+
+```svelte
+<script lang="ts">
+  import type { HTMLButtonAttributes } from 'svelte/elements'
+
+  type Props = HTMLButtonAttributes & { children: Snippet }
+  let { children, ...restProps }: Props = $props()
 </script>
 
 <button {...restProps}>
-  {#if left}
-    <div
-      role="presentation"
-      onmouseenter={() => {
-        isLeftHovered = true
-        onleftmouseover?.()  <!-- 옵셔널이므로 ?. 로 호출 -->
-      }}
-    >
-      {@render left(isLeftHovered)}
-    </div>
-  {/if}
   {@render children()}
 </button>
 ```
 
-```svelte
-<!-- 사용하는 쪽 -->
-<Button onleftmouseover={() => console.log('left hovered')}>검색</Button>
-```
-
-| | Svelte 4 | Svelte 5 |
-|--|--|--|
-| 커스텀 이벤트 | `createEventDispatcher()` + `dispatch('event')` | 함수 prop |
-| 사용 | `on:event={handler}` | `onevent={handler}` |
-
-### 이벤트 버블링과 캡처
-
-이벤트는 기본적으로 안쪽 → 바깥쪽(버블링)으로 전파된다.
-
-```svelte
-<div onclick={() => console.log('div')}>
-  <button onclick={(e) => {
-    console.log('button')
-    e.stopPropagation()  // div까지 전파 차단
-  }}>
-    클릭
-  </button>
-</div>
-<!-- 출력: button -->
-```
-
-캡처는 바깥쪽 → 안쪽 순서. Svelte에서는 이벤트명에 `capture` 붙이면 된다.
-
-```svelte
-<!-- 일반 JS: addEventListener('click', fn, { capture: true }) -->
-<!-- Svelte: onclickcapture -->
-<div onclickcapture={(e) => {
-  console.log('div 먼저')
-  e.stopPropagation()  // button 이벤트 실행 안 됨
-}}>
-  <button onclick={() => console.log('button')}>클릭</button>
-</div>
-<!-- 출력: div 먼저 -->
-```
-
-### 이벤트 위임 (Event Delegation)
-
-Svelte는 성능을 위해 이벤트 리스너를 해당 요소가 아닌 **루트 요소**에 등록한다.
-DevTools에서 버튼을 검사하면 버튼에 직접 리스너가 없고 루트에 붙어있는 걸 볼 수 있다.
-개발 시에는 신경 쓸 필요 없다.
+이제 `<Button disabled>`, `<Button onclick={...}>` 모두 내부 `<button>`에 전달된다.
 
 ---
 
-## 외부 노출 — bind:this + export const
+## 외부 노출 — export const
 
-컴포넌트 내부 HTML 요소에 프로그래밍 방식으로 접근할 때 사용한다.
-`bind:this`로 내부 요소 참조를 잡고, `export const`로 외부에 함수를 노출한다.
+자식 컴포넌트의 메서드를 부모에서 호출해야 할 때.
 
 ```svelte
-<!-- Button.svelte -->
-<script lang="ts">
-  let button = $state<HTMLButtonElement>()
-
-  // 외부에 노출할 함수
-  export const focus = () => button?.focus()
-  export const getButton = () => button  // 요소 자체를 반환
+<!-- Child.svelte -->
+<script>
+  let el = $state<HTMLInputElement>()
+  export const focus = () => el?.focus()
 </script>
-
-<button bind:this={button} {...restProps}>
-  {@render children()}
-</button>
+<input bind:this={el} />
 ```
 
 ```svelte
-<!-- 사용하는 쪽 -->
-<script lang="ts">
-  import Button from './Button.svelte'
-
-  let btn: ReturnType<typeof Button>  // 컴포넌트 타입 — export한 함수 자동완성 가능
-
-  $effect(() => {
-    btn.focus()               // export한 함수 호출
-    btn.getButton()?.click()  // 요소 자체를 받아 DOM 메서드 직접 호출
-  })
+<!-- Parent.svelte -->
+<script>
+  let child: ReturnType<typeof Child>
 </script>
-
-<Button bind:this={btn}>클릭</Button>
+<Child bind:this={child} />
+<button onclick={() => child.focus()}>포커스</button>
 ```
-
-> `bind:this`를 컴포넌트에 사용하면 해당 컴포넌트가 `export`한 값/함수에 접근할 수 있다.
-> HTML 요소에 `bind:this`를 사용하면 DOM 요소 자체를 참조한다.
 
 ---
 
-## 동적 태그 — svelte:element
-
-`href` 유무에 따라 `<button>` 또는 `<a>`를 렌더링하는 패턴.
-
-```svelte
-<!-- Button.svelte -->
-<script lang="ts">
-  import type { HTMLButtonAttributes, HTMLAnchorAttributes } from 'svelte/elements'
-
-  // href 있으면 앵커 속성, 없으면 버튼 속성
-  type Props =
-    | (HTMLAnchorAttributes & { href: string })
-    | (HTMLButtonAttributes & { href?: never })
-
-  let { href, children, ...restProps }: Props = $props()
-
-  let tag = $derived(href ? 'a' : 'button')
-  let el: HTMLButtonElement | HTMLAnchorElement
-</script>
-
-<svelte:element this={tag} bind:this={el} {...restProps}>
-  {@render children()}
-</svelte:element>
-```
-
-```svelte
-<!-- 사용하는 쪽 -->
-<Button>클릭</Button>                        <!-- <button> 렌더링 -->
-<Button href="https://svelte.dev">이동</Button>  <!-- <a> 렌더링 -->
-```
-
-`href?: never` — href 없을 때 버튼 속성만 허용, `href: string` — href 있을 때 앵커 속성만 허용.
-union 타입으로 분기해서 TypeScript가 상황에 맞는 속성을 정확히 추론한다.
-
----
-
-## Svelte 5 — 레거시 문법 대체표
+## 레거시 → Svelte 5 대체표
 
 | 레거시 | Svelte 5 |
 | -- | -- |
 | `export let x` | `let { x } = $props()` |
-| `$$props`, `$$restProps` | `$props()` |
 | `on:click={...}` | `onclick={...}` |
 | `<slot>` | `{#snippet}` + `{@render}` |
-| `<svelte:component this={C}>` | `<C>` |
-| `<svelte:self>` | `import Self from './...'` + `<Self>` |
+| `<svelte:component this={C}>` | `<C>` (동적 컴포넌트) |
 | `use:action` | `{@attach ...}` |
 | `class:active={bool}` | `class={[bool && 'active']}` |
+| stores | `$state` 클래스 |
