@@ -18,12 +18,22 @@ setInterval(() => date.setSeconds(date.getSeconds() + 1), 1000)
 ```
 
 ```
-Date 객체의 setSeconds()는 내부 값을 변경(mutate)하지만,
-$state는 "재할당"을 감지하는 것이지 내부 변경을 감지하지 않는다.
+$state는 Proxy로 프로퍼티 변경을 감지한다:
+  user.name = 'kim'     // ✅ Proxy set trap → 감지됨
+
+그런데 Date의 setSeconds()는 왜 안 되는가?
+
+Date, Map, Set 같은 내장 객체는 "내부 슬롯(internal slot)"에 데이터를 저장한다.
+  - Date → [[DateValue]] 슬롯에 타임스탬프 저장
+  - Map  → [[MapData]] 슬롯에 엔트리 저장
+
+setSeconds()는 프로퍼티를 바꾸는 게 아니라 내부 슬롯을 직접 변경한다.
+Proxy의 set trap은 프로퍼티 변경만 가로채므로, 내부 슬롯 변경은 감지 불가.
 
 let date = $state(new Date())
-date.setSeconds(...)    // ❌ 내부 변경 → $state가 감지 못함
-date = new Date()       // ✅ 재할당 → $state가 감지
+date.setSeconds(...)    // ❌ 내부 슬롯 변경 → Proxy가 가로챌 수 없음
+date.someProperty = 1   // ✅ 프로퍼티 변경 → Proxy set trap 동작
+date = new Date()       // ✅ 재할당 → 감지됨
 ```
 
 ### 해결: 매번 새 객체를 재할당
