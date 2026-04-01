@@ -49,6 +49,21 @@ const { name } = user  // name은 그냥 string → 반응성 없음
 user.name               // 직접 접근해야 추적됨
 ```
 
+```
+$state 객체는 Proxy로 감싸져 있다.
+프로퍼티를 읽으면 Proxy의 get trap이 호출되어 의존성이 등록된다.
+
+user.name 접근 시:
+  → Proxy get trap → $.get() 호출 → 의존성 등록 → 'jh' 반환
+  → 이후 user.name 변경 시 UI 갱신 ✅
+
+구조분해 시:
+  const { name } = user
+  → Proxy get trap 호출 → 'jh' 반환 → name 변수에 'jh' 복사
+  → name은 일반 string. Proxy와의 연결 끊김.
+  → 이후 user.name 변경 시 name 변수는 여전히 'jh' ❌
+```
+
 ### $state.raw — 재할당 전용
 
 Proxy 오버헤드 없이 **재할당만** 감지. API 응답 같은 큰 객체에 적합.
