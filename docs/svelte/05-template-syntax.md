@@ -89,3 +89,48 @@ key 있음: 항목 기준 매핑 → A 노드 정확히 제거
 ```
 
 React에서 `key`를 빼먹으면 생기는 문제와 정확히 같다.
+
+---
+
+## {#await} — Promise 기반 비동기 UI
+
+컴포넌트에서 Promise의 3가지 상태를 선언적으로 처리.
+
+```ts
+const dataPromise = fetch('/api/data').then(r => r.json())
+```
+
+```svelte
+{#await dataPromise}
+  <p>로딩 중...</p>
+{:then data}
+  <p>{data.name}</p>
+{:catch error}
+  <p>에러: {error.message}</p>
+{/await}
+```
+
+```
+Promise 생성
+     │
+     ├─ pending   → {#await promise} 블록 렌더링
+     ├─ fulfilled → {:then value} 블록 렌더링
+     └─ rejected  → {:catch error} 블록 렌더링
+```
+
+### React 비교
+
+```jsx
+// React: 3개 상태 + useEffect 직접 관리
+const [data, setData] = useState(null)
+const [loading, setLoading] = useState(true)
+const [error, setError] = useState(null)
+
+useEffect(() => {
+  fetch(url).then(r => r.json())
+    .then(d => { setData(d); setLoading(false) })
+    .catch(e => { setError(e); setLoading(false) })
+}, [])
+
+// Svelte: Promise 하나 + {#await} → 상태 관리 불필요
+```
