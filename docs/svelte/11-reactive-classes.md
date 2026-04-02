@@ -481,8 +481,417 @@ API 응답처럼 통째로 교체하는 객체:
   사용자 A 요청 → count.value = 5
   사용자 B 요청 → count.value가 5로 보임 ← 데이터 유출!
 
-해결: 서버에서도 안전한 공유 상태가 필요하면 → Context API (setContext/getContext)
+해결: 서버에서도 안전한 공유 상태가 필요하면 → Context API
       Context는 컴포넌트 트리 범위로 스코프되어 요청 간 격리됨
+```
+
+---
+
+## 전역 상태 공유: 3가지 방법 비교
+
+위에서 다룬 팩토리 함수, 클래스, `$state` 객체를 모듈 레벨에서 export하면 전역 상태가 된다. 각각의 특성과 선택 기준.
+
+### 방법 1: $state 객체 (Proxy) — 가장 간단, 가장 많이 씀
+
+```ts
+// counter.svelte.ts
+export const counter = $state({ count: 0 })
+export function increment() { counter.count++ }
+```
+
+- `$state`에 객체를 넘기면 Proxy로 감싸짐 → 프로퍼티 접근이 곧 반응성
+- 재할당 없이 프로퍼티만 변경 → `export const`로 내보내기 가능
+- 공식 문서 권장 방식
+
+### 방법 2: 팩토리 함수 (getter/setter 객체)
+
+```ts
+// counter.svelte.ts
+let count = $state(0)
+
+export default {
+  get value() { return count },
+  set value(v) { count = v },
+  increment: () => count++,
+}
+```
+
+- **원시값**(`number`, `string`)을 공유할 때 필요 (원시값은 Proxy 불가)
+- getter를 빠뜨리면 반응성 끊김 — 수동 관리 필요
+- setter에 유효성 검사, 변환 로직 삽입 가능
+
+### 방법 3: 클래스 싱글톤
+
+```ts
+// counter.svelte.ts
+class Counter {
+  count = $state(0)           // 컴파일러가 getter/setter 자동 생성
+  increment() { this.count++ }
+  reset() { this.count = 0 }
+}
+export default new Counter()  // 인스턴스 export → 싱글톤
+```
+
+- 컴파일러가 `$state` 필드에 getter/setter **자동 생성** → 실수 방지
+- `#private`, 메서드, `$effect` 등 복잡한 로직 캡슐화
+- `new Counter()` export → 싱글톤 / `Counter` export → 독립 인스턴스
+
+### 선택 가이드
+
+```
+"전역 상태가 필요하다"
+  │
+  ├─ 상태가 단순? (카운터, 토글, 유저 정보)
+  │   └─ $state 객체 (Proxy) ✅ 기본 선택
+  │
+  ├─ 원시값 공유 or setter에 로직 필요?
+  │   └─ 팩토리 함수 (getter/setter)
+  │
+  ├─ 상태 + 비동기 + 유효성 + 복잡한 로직?
+  │   └─ 클래스 싱글톤
+  │
+  └─ SSR 환경 + 사용자별 데이터?
+      └─ Context API (아래 참조)
+```
+
+---
+
+## 모듈 레벨 상태 vs Context API
+
+위 3가지 방법은 모두 **모듈 레벨** 공유다. Context API는 근본적으로 다른 접근.
+
+```
+┌──────────────────┬──────────────────────┬─────────────────────────┐
+│                  │ 모듈 레벨 ($state)    │ Context API             │
+├──────────────────┼──────────────────────┼─────────────────────────┤
+│ 범위             │ 앱 전체 (싱글톤)      │ 컴포넌트 트리 범위       │
+│ 접근 방식        │ import               │ createContext getter     │
+│ SSR 안전성       │ ❌ 요청 간 공유됨     │ ✅ 요청별 격리           │
+│ 사용 위치        │ 어디서든              │ 컴포넌트 초기화 시점만    │
+│ 주 용도          │ 클라이언트 전역 상태   │ 트리 범위 DI (의존성 주입)│
+└──────────────────┴──────────────────────┴─────────────────────────┘
+```
+
+### Context API 사용법 (Svelte 5.40+)
+
+```ts
+// context.ts (일반 .ts — rune 불필요)
+import { createContext } from 'svelte'
+
+interface User { name: string; role: string }
+
+export const [getUser, setUser] = createContext<User>()
+```
+
+```svelte
+<!-- Parent.svelte -->
+<script>
+  import { setUser } from './context'
+  setUser({ name: 'heon', role: 'admin' })  // 트리 범위에 제공
+</script>
+
+{@render children()}
+```
+
+```svelte
+<!-- 깊은 자식.svelte -->
+<script>
+  import { getUser } from './context'
+  const user = getUser()  // prop drilling 없이 접근
+</script>
+<p>{user.name}</p>
+```
+
+> 5.40 이전: `setContext('key', value)` / `getContext('key')` 사용
+
+### Context에 반응형 상태 넣기
+
+Context 자체는 반응성이 없다. 반응형 상태를 넣으려면 `$state` 객체를 전달한다.
+
+```svelte
+<!-- Parent.svelte -->
+<script>
+  import { setUser } from './context'
+
+  let user = $state({ name: 'heon', role: 'admin' })
+  setUser(user)  // $state 객체(Proxy)를 context로 전달
+</script>
+
+<button onclick={() => user.role = 'superadmin'}>승격</button>
+```
+
+```svelte
+<!-- Child.svelte -->
+<script>
+  import { getUser } from './context'
+  const user = getUser()
+</script>
+<p>{user.role}</p>  <!-- 부모가 변경하면 자동 갱신 -->
+```
+
+```
+주의: context 값을 재할당하면 연결이 끊긴다.
+  user = { name: 'new' }    ❌ 새 객체 — context와의 참조 끊김
+  user.name = 'new'         ✅ 프로퍼티 변경 — Proxy 반응성 유지
+```
+
+### 언제 뭘 쓰나
+
+```
+클라이언트 전용 상태 (테마, UI 토글, 장바구니 등)
+  → 모듈 레벨 $state ✅
+
+SSR 환경 + 사용자별 데이터 (인증, 설정 등)
+  → Context API ✅
+
+특정 트리 범위에서만 공유 (모달 내부, 폼 그룹 등)
+  → Context API ✅
+
+React 비유:
+  모듈 레벨 $state  ≈  전역 변수 / Zustand
+  Context API       ≈  React.createContext + useContext
+```
+
+### Context 실전 — 트리 범위 상태 공유
+
+모듈 레벨 상태는 **앱 전체**에서 공유된다. 같은 컴포넌트를 여러 곳에서 쓰되, **그룹별로 독립된 상태**가 필요하면 Context를 사용한다.
+
+#### 문제: 모듈 상태는 모든 인스턴스에서 공유됨
+
+```svelte
+<!-- ClickToCount.svelte — 모듈 상태를 사용 -->
+<script>
+  import { count } from './counter.svelte.ts'
+</script>
+<button onclick={() => count.value++}>{count.value}</button>
+```
+
+```svelte
+<!-- App.svelte -->
+<ClickToCount />  <!-- ┐ -->
+<ClickToCount />  <!-- ┘ 모두 같은 count를 공유 — 하나 클릭하면 전부 변경 -->
+
+<ClickToCount />  <!-- ┐ -->
+<ClickToCount />  <!-- ┘ 이것도 같은 count — 그룹 분리 불가능 -->
+```
+
+#### 해결: 부모 컴포넌트에서 Context로 상태 제공
+
+```svelte
+<!-- Counter.svelte — 부모 컴포넌트 -->
+<script lang="ts">
+  import { setContext, type Snippet } from 'svelte'
+
+  let { children }: { children: Snippet } = $props()
+
+  // $state 객체를 context로 설정 → 반응형 상태 공유
+  let count = $state({ value: 0 })
+
+  function increment() { count.value++ }
+  function reset() { count.value = 0 }
+
+  setContext<CounterContext>('count', { count, increment, reset })
+</script>
+
+{@render children()}
+```
+
+```svelte
+<!-- ClickToCount.svelte — 자식 컴포넌트 -->
+<script lang="ts">
+  import { getContext } from 'svelte'
+
+  const counter = getContext<CounterContext>('count')
+</script>
+
+<button onclick={counter.increment}>{counter.count.value}</button>
+<button onclick={counter.reset}>리셋</button>
+```
+
+```svelte
+<!-- App.svelte -->
+<script>
+  import Counter from './Counter.svelte'
+  import ClickToCount from './ClickToCount.svelte'
+</script>
+
+<Counter>           <!-- 그룹 A: 독립된 상태 -->
+  <ClickToCount />
+  <ClickToCount />  <!-- A 내부에서 동기화 -->
+</Counter>
+
+<Counter>           <!-- 그룹 B: 독립된 상태 -->
+  <ClickToCount />
+  <ClickToCount />  <!-- B 내부에서 동기화, A와 독립 -->
+</Counter>
+```
+
+```
+동작 원리:
+
+  Counter A → setContext('count', $state({ value: 0 }))
+    ├─ ClickToCount → getContext('count') → A의 상태
+    └─ ClickToCount → getContext('count') → A의 상태  ← 동기화됨
+
+  Counter B → setContext('count', $state({ value: 0 }))  ← 별개의 $state
+    ├─ ClickToCount → getContext('count') → B의 상태
+    └─ ClickToCount → getContext('count') → B의 상태  ← 동기화됨
+
+  각 Counter가 독립된 $state를 만들어 context로 제공
+  → 같은 Counter 안의 자식끼리만 상태 공유
+```
+
+#### 핵심: Context 자체는 반응형이 아니다
+
+```ts
+// ❌ 단순 값 전달 — 반응성 없음
+setContext('count', 0)
+
+// 자식에서:
+let count = getContext('count')  // 0 (값 복사)
+count++                          // 로컬 변수만 변경, 다른 자식에 영향 없음
+```
+
+```
+Context에 원시값(숫자, 문자열)을 넣으면:
+  → 자식이 getContext로 받는 건 "값의 복사본"
+  → 자식에서 변경해도 다른 자식에 전달되지 않음
+  → 해당 컴포넌트 로컬 상태처럼만 동작
+
+반응형으로 만들려면:
+  → $state 객체(Proxy)를 전달  ← 가장 간단
+  → getter/setter 객체를 전달  ← 원시값 공유 시
+  → 클래스 인스턴스를 전달     ← 복잡한 로직 시
+```
+
+#### 대안: getter/setter 객체로 Context에 전달
+
+원시값을 공유하거나 setter에 로직이 필요하면 getter/setter 패턴을 사용한다.
+
+```svelte
+<!-- Counter.svelte — getter/setter 버전 -->
+<script lang="ts">
+  import { setContext, type Snippet } from 'svelte'
+
+  let { children }: { children: Snippet } = $props()
+
+  let count = $state(0)  // 원시값
+
+  setContext('count', {
+    get value() { return count },     // 읽기: 반응성 유지
+    set value(v: number) { count = v }, // 쓰기: 유효성 검사 삽입 가능
+    increment: () => count++,
+    reset: () => count = 0,
+  })
+</script>
+
+{@render children()}
+```
+
+```svelte
+<!-- ClickToCount.svelte -->
+<script lang="ts">
+  import { getContext } from 'svelte'
+
+  const counter = getContext<{ value: number; increment: () => void; reset: () => void }>('count')
+</script>
+
+<button onclick={counter.increment}>{counter.value}</button>
+```
+
+```
+$state 객체 vs getter/setter — Context에서의 선택:
+
+  $state({ value: 0 })          getter/setter 객체
+  ─────────────────────          ──────────────────
+  Proxy가 자동 처리               수동으로 작성
+  프로퍼티 변경으로 반응성         getter 접근으로 반응성
+  코드 간결                      setter에 유효성 검사 가능
+  ✅ 기본 선택                    원시값 공유 시 필요
+```
+
+> 클래스 인스턴스도 동일하게 `setContext`에 전달할 수 있다. `$state` 필드의 getter/setter가 자동 생성되므로 가장 안전한 방법이다.
+
+#### hasContext — 컨텍스트 없으면 로컬 상태로 폴백
+
+컴포넌트가 **단독으로도** 사용되고, **Context 안에서도** 사용될 수 있다면 `hasContext`로 분기한다.
+
+```svelte
+<!-- ClickToCount.svelte -->
+<script lang="ts">
+  import { getContext, hasContext } from 'svelte'
+
+  // Context가 있는지 확인 — 반드시 스크립트 최상위에서 호출
+  const hasCountContext = hasContext('count')
+
+  // 로컬 상태 생성 함수 — Context와 동일한 인터페이스
+  function createLocalState() {
+    let count = $state(0)
+    return {
+      get value() { return count },
+      increment: () => count++,
+      reset: () => count = 0,
+    }
+  }
+
+  // Context가 있으면 공유 상태, 없으면 로컬 상태
+  const counter = hasCountContext
+    ? getContext<{ value: number; increment: () => void; reset: () => void }>('count')
+    : createLocalState()
+</script>
+
+<button onclick={counter.increment}>{counter.value}</button>
+<button onclick={counter.reset}>리셋</button>
+```
+
+```svelte
+<!-- App.svelte -->
+<ClickToCount />       <!-- 단독 사용: 로컬 상태 (독립) -->
+
+<Counter>              <!-- Counter 안: 공유 상태 -->
+  <ClickToCount />
+  <ClickToCount />     <!-- 이 둘은 동기화됨 -->
+</Counter>
+
+<Counter>
+  <ClickToCount />
+  <ClickToCount />     <!-- 이 둘도 동기화됨, 위 그룹과는 독립 -->
+</Counter>
+```
+
+```
+hasContext 동작:
+
+  ClickToCount (단독)
+    → hasContext('count') = false
+    → createLocalState() → 로컬 $state 사용
+    → 다른 컴포넌트와 상태 공유 없음
+
+  Counter > ClickToCount
+    → hasContext('count') = true
+    → getContext('count') → 부모의 $state 사용
+    → 같은 Counter 안의 자식끼리 동기화
+
+핵심: 로컬 상태와 공유 상태의 인터페이스를 동일하게 유지
+  → counter.value, counter.increment, counter.reset
+  → 마크업 코드를 분기할 필요 없음
+```
+
+#### Context API 제약사항
+
+```
+1. setContext / getContext / hasContext는 스크립트 최상위에서만 호출 가능
+   ✅ <script> 최상위
+   ❌ 함수 내부, 콜백 내부, $effect 내부
+
+2. getAllContexts() — 부모가 설정한 모든 컨텍스트를 Map으로 반환
+   const allCtx = getAllContexts()
+   // Map { 'count' => { value: 0, ... }, 'theme' => { ... } }
+   // Context가 없으면 빈 Map
+
+3. Context는 "한 방향"
+   → 부모 → 자식으로만 전달 (React와 동일)
+   → 자식이 부모에게 context로 값을 올릴 수 없음
 ```
 
 ---
@@ -507,8 +916,10 @@ Svelte: new ReactiveService() → svc.value, svc.loading
 
 | 패턴 | 용도 | 주의점 |
 |------|------|--------|
-| 팩토리 함수 | 단순한 로직 추출 | getter 수동 작성 필요 |
-| 리액티브 클래스 | 로직 캡슐화 + 재사용 | **구조분해 금지**, 컴파일러가 getter 자동 생성 |
-| 모듈 레벨 상태 | 여러 컴포넌트 간 상태 공유 | 직접 export 불가, getter/setter 객체로 감싸기 |
+| `$state` 객체 export | **전역 상태 (기본 선택)** | 프로퍼티 변경만 가능, 재할당 ✗ |
+| 팩토리 함수 | 원시값 공유 / setter 로직 | getter 수동 작성 필요 |
+| 클래스 싱글톤 | 복잡한 로직 캡슐화 + 재사용 | **구조분해 금지**, 컴파일러가 getter 자동 생성 |
+| Context API | SSR 안전 / 트리 범위 공유 | 반응형 값 전달 필수, 스크립트 최상위에서만 호출 |
+| `hasContext` 폴백 | 단독/Context 양쪽 사용 가능 | 로컬 상태와 동일한 인터페이스 유지 |
 | `.svelte.ts` | 컴포넌트 외부에서 rune 사용 | 일반 `.ts`에서는 rune 불가 |
 | `#private` field | 내부 연쇄에서 setter 우회 | 부수효과 필요 시 공개 setter 사용 |
