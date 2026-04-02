@@ -97,3 +97,62 @@ onMount(() => {
 | SSR | 실행 안 됨 | 실행 안 됨 |
 
 > **원칙**: 상태 동기화에 `$effect`를 쓰지 말 것. `$derived`로 해결 가능한지 먼저 확인한다. `$effect`는 외부 시스템 연동(DOM 조작, 네트워크, analytics)용 escape hatch다.
+
+---
+
+## $effect.tracking -- 추적 컨텍스트 감지
+
+현재 코드가 **추적 컨텍스트(tracking context)** 안에서 실행 중인지 `boolean`으로 반환한다.
+
+### 추적 컨텍스트란?
+
+반응형 값을 읽으면 해당 값의 변경을 **추적(구독)하는 곳**. 즉, 값이 바뀌면 다시 실행되는 곳이다.
+
+| 위치 | `$effect.tracking()` | 이유 |
+|--|--|--|
+| `<script>` 최상위 | `false` | 컴포넌트 setup은 1회만 실행, 재실행 안 됨 |
+| `$effect` 내부 | `true` | 의존성 변경 시 재실행됨 |
+| 템플릿 (`{expression}`) | `true` | 값 변경 시 DOM 업데이트 필요 |
+| 이벤트 핸들러 (`onclick`) | `false` | 사용자 액션으로 실행, 추적 불필요 |
+
+```svelte
+<script>
+  console.log('setup:', $effect.tracking())       // false
+
+  $effect(() => {
+    console.log('effect:', $effect.tracking())     // true
+  })
+</script>
+
+<p>template: {$effect.tracking()}</p>              <!-- true -->
+```
+
+### React 비유
+
+React에는 직접 대응하는 API가 없다. 굳이 비유하면:
+
+- **추적 컨텍스트** ≈ React 컴포넌트의 렌더 페이즈 (JSX 반환하는 본문)
+- **비추적 컨텍스트** ≈ 이벤트 핸들러, setTimeout 콜백
+
+### 용도
+
+주로 **라이브러리 작성자**를 위한 고급 기능. 추적 컨텍스트 여부에 따라 동작을 분기할 때 사용한다.
+
+```js
+// 라이브러리 내부 예시: 추적 컨텍스트일 때만 구독 생성
+function createSmartValue() {
+  let value = $state(0)
+
+  return {
+    get current() {
+      if ($effect.tracking()) {
+        // effect/템플릿에서 읽힘 → 구독 설정
+        subscribe()
+      }
+      return value
+    }
+  }
+}
+```
+
+> 일반 애플리케이션 코드에서는 거의 사용할 일이 없다. "이런 게 있다" 정도로 알아두면 충분.
