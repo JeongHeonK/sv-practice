@@ -134,3 +134,14 @@ useEffect(() => {
 
 // Svelte: Promise 하나 + {#await} → 상태 관리 불필요
 ```
+
+---
+
+## 관련 Svelte 5 문법 참고
+
+이 문서에서 다루지 않은 템플릿 관련 Svelte 5 문법은 각 전용 문서를 참조:
+
+- **이벤트 핸들러**: `onclick={}`  속성 형태 사용 (`on:click` 레거시) → [02-runes.md](02-runes.md) 참조
+- **Snippet/렌더**: `{#snippet}`과 `{@render}`로 재사용 마크업 → [06-snippets.md](06-snippets.md) 참조
+- **Attachment**: `{@attach fn}`으로 DOM 동작 부착 (`use:action` 레거시) → [16-actions.md](16-actions.md) 참조
+- **class 속성**: clsx 스타일 배열/객체 (`class:` 디렉티브 레거시) → [07-styling.md](07-styling.md) 참조

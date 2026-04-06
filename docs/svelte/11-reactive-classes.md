@@ -110,6 +110,8 @@ class Counter {
 
 **결론: 재사용 로직이 단순하면 팩토리 함수, 상태가 여러 개이거나 복잡하면 클래스.**
 
+> **Svelte 4 stores vs Svelte 5 클래스**: Svelte 4에서는 `writable`, `readable`, `derived` 같은 store를 사용했다. Svelte 5에서는 `$state` 필드를 가진 클래스가 store를 대체한다. 클래스는 컴파일러가 getter/setter를 자동 생성하고, 타입 안전성이 높으며, 일반 JS 문법으로 로직을 캡슐화할 수 있어 store보다 우월하다.
+
 ---
 
 ## 패턴 4: 리액티브 클래스 — $state + getter/setter + #private
@@ -151,6 +153,15 @@ class ReactiveService {
 loading = $state(true)
   → Svelte 컴파일러가 내부적으로 getter/setter 생성
   → 외부에서 instance.loading 접근 시 의존성 자동 등록
+```
+
+**계산된 값은 $derived로:**
+```ts
+class TodoList {
+  items = $state<Todo[]>([])
+  doneCount = $derived(this.items.filter(i => i.done).length)
+  //         ↑ 간단한 계산에 $derived 활용 — $effect로 상태 동기화하지 말 것
+}
 ```
 
 **$effect는 생성자에서 등록 가능:**

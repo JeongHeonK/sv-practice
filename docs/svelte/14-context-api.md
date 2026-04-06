@@ -402,4 +402,44 @@ ClickToCount.svelte                   getCounterContext() (래퍼)
 | `$state` 객체 전달 | Context에서 반응형 공유 (기본 선택) | Proxy 전달, 프로퍼티 변경으로 반응성 |
 | getter/setter 전달 | 원시값 공유 / setter 유효성 검사 | 수동 작성 필요, setter에 로직 삽입 가능 |
 
-> **참고**: Svelte 5.40+에서는 `createContext`가 권장된다 (11번 문서의 Context API 사용법 참조). 아래 예제들은 `setContext/getContext`를 직접 사용하여 원리를 이해하기 위한 것이다.
+> **중요 — Svelte 5.40+ 권장 패턴**: `createContext`를 사용하면 타입 안전성이 보장되고 키 충돌을 원천 차단할 수 있다. 새 코드에서는 `createContext`를 기본으로 사용하고, `setContext/getContext`는 원리 학습용 또는 레거시 코드에서만 사용한다. `createContext` 사용법은 [11-reactive-classes.md](11-reactive-classes.md)의 Context API 섹션 참조.
+
+### createContext 방식으로 위 캡슐화를 더 간결하게 (5.40+)
+
+```ts
+// lib/context/counter-context.svelte.ts (createContext 버전)
+import { createContext } from 'svelte'
+
+interface CounterContext {
+  value: number
+  increment: () => void
+  reset: () => void
+}
+
+// createContext가 타입·키를 모두 처리 — Symbol 키 수동 생성 불필요
+export const [getCounterContext, setCounterContext] = createContext<CounterContext>()
+
+export function createCounterState(initial = 0) {
+  let count = $state(initial)
+  return {
+    get value() { return count },
+    increment: () => count++,
+    reset: () => count = 0,
+  }
+}
+```
+
+```svelte
+<!-- Counter.svelte (createContext 버전) -->
+<script lang="ts">
+  import { type Snippet } from 'svelte'
+  import { setCounterContext, createCounterState } from '$lib/context/counter-context.svelte.ts'
+
+  let { children, initialCount = 0 }: { children: Snippet; initialCount?: number } = $props()
+  setCounterContext(createCounterState(initialCount))
+</script>
+
+{@render children()}
+```
+
+> 아래 예제들은 `setContext/getContext`를 직접 사용하여 원리를 이해하기 위한 것이다.

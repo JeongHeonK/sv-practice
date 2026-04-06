@@ -214,17 +214,24 @@ target 변경                          target input 변경
 
 ## 패턴 3: bind:value getter/setter — 입력 유효성 검사
 
-Svelte 5에서 `bind:value`에 getter/setter 함수를 직접 넘길 수 있다.
+Svelte 5에서 getter/setter 객체와 `bind:value`를 조합하여 유효성 검사를 삽입할 수 있다.
 
 ```svelte
+<script>
+  let amount = $state(1)
+
+  // getter/setter 객체로 유효성 검사 삽입
+  let validated = {
+    get value() { return amount },
+    set value(v: number) { amount = Math.max(0, v) }
+  }
+</script>
+
 <!-- 기본 양방향 바인딩 -->
 <input type="number" bind:value={amount} />
 
-<!-- getter/setter: 유효성 검사 삽입 -->
-<input type="number" bind:value={
-  () => amount,
-  (v) => amount = Math.max(0, v)
-} />
+<!-- getter/setter로 유효성 검사 삽입 -->
+<input type="number" bind:value={validated.value} />
 ```
 
 ### 동작 흐름
@@ -254,11 +261,8 @@ const [amount, setAmount] = useState(1)
   }}
 />
 
-// Svelte: bind:value getter/setter
-<input type="number" bind:value={
-  () => amount,
-  (v) => amount = v < 0 ? 0 : v
-} />
+// Svelte: getter/setter 객체 + bind:value
+<input type="number" bind:value={validated.value} />
 ```
 
 ---

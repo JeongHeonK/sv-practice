@@ -97,6 +97,14 @@ onMount(() => {
 | SSR | 실행 안 됨 | 실행 안 됨 |
 
 > **원칙**: 상태 동기화에 `$effect`를 쓰지 말 것. `$derived`로 해결 가능한지 먼저 확인한다. `$effect`는 외부 시스템 연동(DOM 조작, 네트워크, analytics)용 escape hatch다.
+>
+> **$effect 대안 체크리스트**:
+> - 상태 → 상태 동기화? → `$derived` 사용
+> - 외부 DOM 라이브러리 연동? → `{@attach ...}` 사용 (Svelte 5.29+)
+> - 사용자 인터랙션 반응? → 이벤트 핸들러 사용
+> - 외부 값 구독 (WebSocket 등)? → `createSubscriber` 사용
+> - 디버깅 로깅? → `$inspect` 또는 `$inspect.trace()` 사용
+> - `if (browser) { ... }` 래핑? → 불필요 ($effect는 서버에서 실행되지 않음)
 
 ---
 
@@ -156,3 +164,18 @@ function createSmartValue() {
 ```
 
 > 일반 애플리케이션 코드에서는 거의 사용할 일이 없다. "이런 게 있다" 정도로 알아두면 충분.
+
+---
+
+## $inspect.trace — effect 재실행 원인 추적
+
+`$effect` 또는 `$derived.by` 내부의 **첫 번째 줄**에 `$inspect.trace(label)`을 추가하면, 어떤 의존성 변경이 해당 블록을 트리거했는지 콘솔에 출력한다.
+
+```js
+$effect(() => {
+  $inspect.trace('my-effect')  // 첫 번째 줄에 작성
+  canvas.draw(data)
+})
+```
+
+반응성 디버깅에 유용 — 무언가 너무 자주 재실행되거나 예상치 못한 트리거가 있을 때 사용한다.

@@ -228,3 +228,32 @@ $effect(() => {
 ```js
 console.log($state.snapshot(user))  // 순수 JS 객체
 ```
+
+---
+
+## Svelte 5 문법 참고
+
+### 이벤트 핸들러
+
+Svelte 5에서는 `on:` 디렉티브 대신 **속성 형태**로 이벤트를 바인딩한다:
+
+```svelte
+<!-- ✅ Svelte 5 권장 -->
+<button onclick={() => count++}>클릭</button>
+<button {onclick}>축약형</button>
+
+<!-- ❌ Svelte 4 레거시 -->
+<button on:click={() => count++}>클릭</button>
+```
+
+### class 속성 — clsx 스타일 배열/객체
+
+Svelte 5에서는 `class:` 디렉티브 대신 배열/객체 구문을 권장한다:
+
+```svelte
+<!-- ✅ Svelte 5 권장: 배열/객체 방식 -->
+<div class={['card', { active: isActive, disabled }]}>
+
+<!-- ❌ Svelte 4 레거시: class: 디렉티브 -->
+<div class="card" class:active={isActive} class:disabled>
+```

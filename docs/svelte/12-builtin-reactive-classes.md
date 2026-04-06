@@ -496,3 +496,5 @@ scrollY = new ReactiveValue(
 
 **핵심: 일반 JS 내장 객체(Date, Map, Set, URL)의 메서드 호출은 `$state`가 감지할 수 없다.
 리액티브 버전을 쓰면 메서드 호출만으로 UI가 갱신된다.**
+
+> **Svelte 4 store와의 비교**: Svelte 4에서는 `writable`, `derived` 같은 store로 반응성을 관리했다. Svelte 5에서는 `$state` 필드를 가진 클래스(내장 리액티브 클래스 포함)가 store를 대체한다. 클래스 방식이 타입 안전하고, 일반 JS 문법으로 작동하며, 컴파일러가 getter/setter를 자동 생성하여 실수를 줄인다.

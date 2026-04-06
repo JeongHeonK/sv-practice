@@ -28,6 +28,8 @@ Context API(14번 참조)의 핵심 활용 사례: Konva 같은 명령형 JS 라
 
 먼저 명령형 방식으로 Konva를 초기화하는 기본 코드.
 
+> **주의**: 아래 초기 예제는 `$effect` 안에서 Stage를 생성한다. 이는 학습용이며, prop 변경 시 전체 재생성되는 문제가 있다. 이후 구현 5에서 `onMount`로 개선한다.
+
 ```svelte
 <script lang="ts">
   import Konva from 'konva'
@@ -1004,3 +1006,5 @@ bind:this로 접근 가능한 멤버:
 | Prop 반응성 | prop별 `$effect` + `setAttr` | `onMount`로 생성, `$effect`로 업데이트 분리 |
 | `$bindable` | x, y 양방향 바인딩 | 구조분해 시 별도 `$effect` 필요 |
 | `bind:this` | `export { node }` / `export function` | Stage는 함수, Layer/Rect는 상수로 export |
+
+> **$state.raw 고려**: Konva 노드 같은 대형 외부 객체를 `$state`로 관리할 때, 프로퍼티 변경이 아닌 재할당만 감지하면 되는 경우 `$state.raw`를 사용하면 Proxy 오버헤드를 줄일 수 있다.
