@@ -346,10 +346,10 @@ bind:offsetHeight
 
 > 상태 이름과 바인딩 프로퍼티 이름이 같으면 `bind:duration={duration}` 대신 `bind:duration`으로 축약 가능.
 
-### 읽기/쓰�� vs 읽기 전용
+### 읽기/쓰기 vs 읽기 전용
 
 ```
-읽기 + ���기 (양방향):
+읽기 + 쓰기 (양방향):
   bind:currentTime   — 탐색(seek) 가능
   bind:paused        — 재생/일시정지 제어
   bind:playbackRate  — 재생 속도 변경
