@@ -173,11 +173,17 @@ class ReactiveService {
   error: string | undefined = $state(undefined)
 
   #source = $state(0)
+  #target = $state(0)
+
   get source() { return this.#source }
   set source(v: number) {
     this.#source = v < 0 ? 0 : v
     this.#target = this.#compute()
   }
+
+  get target() { return this.#target }
+
+  #compute() { return this.#source * 2 }
 
   items = $state<Todo[]>([])
   doneCount = $derived(this.items.filter(i => i.done).length)
@@ -293,6 +299,36 @@ $effect.root(() => {
 
 ### `createContext` (5.40+, 권장)
 
+#### 기본 사용법
+
+```ts
+// lib/context/theme.svelte.ts
+import { createContext } from 'svelte'
+
+// createContext는 [getter, setter] 튜플을 반환
+export const [getTheme, setTheme] = createContext<string>('light')  // 기본값
+```
+
+```svelte
+<!-- Parent.svelte -->
+<script lang="ts">
+  import { setTheme } from '$lib/context/theme.svelte.ts'
+  setTheme('dark')  // 값을 직접 전달
+</script>
+{@render children()}
+```
+
+```svelte
+<!-- Child.svelte -->
+<script lang="ts">
+  import { getTheme } from '$lib/context/theme.svelte.ts'
+  const theme = getTheme()  // 'dark'
+</script>
+<p>현재 테마: {theme}</p>
+```
+
+#### 팩토리 함수와 조합 (반응형 상태 공유)
+
 ```ts
 // lib/context/counter.svelte.ts
 import { createContext } from 'svelte'
@@ -331,6 +367,25 @@ export function createCounterState(initial = 0) {
   const counter = getCounter()
 </script>
 <button onclick={counter.increment}>{counter.value}</button>
+```
+
+기본 사용법은 정적 값 전달에 적합하고, 반응형 상태가 필요하면 팩토리 함수로 `$state` 객체를 만들어 전달한다.
+
+#### 기본값 판단 기준
+
+부모에서 `setter`를 호출하지 않으면 `getter`는 기본값을 반환하고, 기본값이 없으면 런타임 에러가 발생한다.
+
+| 상황 | 기본값 | 이유 |
+|---|---|---|
+| 없어도 말이 되는 값 (테마, 언어) | 넣는다 | setter 누락해도 안전하게 폴백 |
+| 없으면 의미 없는 값 (인증 유저, DB 커넥션) | 안 넣는다 | setter 누락은 버그 → 에러로 빨리 잡는 게 낫다 |
+
+```ts
+// ✅ 기본값 있음 — setter 누락해도 'light' 반환
+export const [getTheme, setTheme] = createContext<string>('light')
+
+// ✅ 기본값 없음 — setter 누락 시 런타임 에러 (의도적)
+export const [getUser, setUser] = createContext<AuthUser>()
 ```
 
 ### `setContext` / `getContext` / `hasContext`
