@@ -103,6 +103,8 @@ routes/+layout.svelte                    ← 1) 루트 레이아웃
 
 **핵심**: 레이아웃은 해당 폴더와 **모든 하위 경로**에 적용된다.
 
+> `+layout.server.ts`로 레이아웃별 데이터 로딩 → [04-loading-data.md](./04-loading-data.md) Section 2 참고
+
 ### 실전 예시: 사이드바 레이아웃
 
 ```svelte
@@ -398,6 +400,26 @@ blog/+layout@.svelte           ← 블로그 레이아웃이 루트에서만 상
 ```text
 기본: 루트 → 마케팅 → 블로그 레이아웃
 리셋: 루트 → 블로그 레이아웃  (마케팅 건너뜀)
+```
+
+### 상속 체인 — before / after 비교
+
+```text
+[기본: +page.svelte]
+루트 → (marketing) → blog → [id] → 페이지
+(모든 레이아웃 상속)
+
+[+page@.svelte — 루트만]
+루트 → 페이지
+(marketing, blog, [id] 건너뜀)
+
+[+page@(marketing).svelte — marketing까지]
+루트 → (marketing) → 페이지
+(blog, [id] 건너뜀)
+
+[+page@blog.svelte — blog까지]
+루트 → (marketing) → blog → 페이지
+([id] 건너뜀)
 ```
 
 ### `@` 구문 정리
