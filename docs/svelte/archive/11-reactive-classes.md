@@ -467,7 +467,7 @@ $effect.root(() => {
   → 모듈 최상위의 localStorage.getItem은 browser 체크 필수
 ```
 
-### $state vs $state.raw 선택 — 공유 상태에서도 동일
+### `$state` vs $state.raw 선택 — 공유 상태에서도 동일
 
 ```
 API 응답처럼 통째로 교체하는 객체:

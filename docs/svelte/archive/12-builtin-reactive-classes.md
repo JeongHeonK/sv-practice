@@ -56,7 +56,7 @@ $effect(() => {
 ```ts
 import { SvelteDate } from 'svelte/reactivity'
 
-let date = new SvelteDate()  // 끝! 메서드 호출 시 자동 반응
+const date = new SvelteDate()  // 끝! 메서드 호출 시 자동 반응
 ```
 
 ---
@@ -68,7 +68,7 @@ let date = new SvelteDate()  // 끝! 메서드 호출 시 자동 반응
 ```ts
 import { SvelteDate } from 'svelte/reactivity'
 
-let date = new SvelteDate()
+const date = new SvelteDate()
 
 // 메서드 호출만으로 반응성 동작 — 재할당 불필요
 setInterval(() => date.setSeconds(date.getSeconds() + 1), 1000)
@@ -100,10 +100,10 @@ SvelteDate:
 ```ts
 import { SvelteMap, SvelteSet } from 'svelte/reactivity'
 
-let map = new SvelteMap()
+const map = new SvelteMap()
 map.set('key', 'value')  // → 반응성 동작
 
-let set = new SvelteSet()
+const set = new SvelteSet()
 set.add('item')          // → 반응성 동작
 ```
 
@@ -119,7 +119,7 @@ URL 조작 시 반응성이 필요할 때 사용.
 ```ts
 import { SvelteURL } from 'svelte/reactivity'
 
-let url = new SvelteURL('https://example.com/path')
+const url = new SvelteURL('https://example.com/path')
 
 // 프로퍼티 변경 시 반응
 url.protocol = 'http:'     // → href 자동 갱신
