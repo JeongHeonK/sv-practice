@@ -36,6 +36,7 @@ Request
 ```
 
 키 충돌 시 page load가 layout load를 오버라이드한다.
+보통은 다르게 사용함. tricky하게 사용하지 말 것
 
 ---
 
@@ -63,7 +64,9 @@ Request
 
 ---
 
-## 5. `hooks.server.ts` — 네비게이션 가드
+## 5. `hooks.server.ts` — 앱 전역 미들웨어
+
+Next.js의 `middleware.ts`와 같은 역할. 모든 SSR 요청이 이 파일을 거친다.
 
 ### `event.locals`로 인증 상태 전파
 
@@ -77,31 +80,70 @@ export const handle: Handle = async ({ event, resolve }) => {
 }
 ```
 
-이후 모든 `load` 함수에서 `event.locals.user`로 접근 가능.
+이후 모든 `load` 함수에서 `event.locals.user`로 접근 가능. **요청 단위 전역 저장소** 역할.
 
-### 미인증 시 `redirect()`
+```text
+hooks.server.ts에서 쿠키 검사 (한번만)
+  → event.locals.user에 저장
+  → 이후 모든 server load에서 꺼내 쓰기만 하면 됨
+```
+
+### hooks와 prerender의 관계
+
+hooks는 **SSR 요청에서만 실행**된다. `prerender = true`인 페이지는 빌드 시 정적 HTML로 생성되므로 요청 자체가 없고, hooks를 타지 않는다.
+
+```text
+/about    → prerender = true  → 빌드 시 정적 HTML, hooks 안 탐
+/dashboard → SSR              → 요청마다 hooks 실행, event.locals 사용 가능
+/pricing  → prerender = true  → 정적 HTML, hooks 안 탐
+```
+
+Next.js는 middleware 존재 시 해당 라우트가 dynamic 강제되지만, SvelteKit은 **페이지별로 독립 제어**하므로 정적 페이지의 성능 이점을 포기할 필요가 없다.
+
+> prerender된 페이지에서 유저 정보가 필요하면 클라이언트에서 API(`+server.ts`)를 fetch하는 방식을 사용한다.
+
+### 보호된 라우트 — layout으로 인증 가드
+
+`(괄호)` 레이아웃 그룹 + layout.server.ts 하나로 인증 가드를 구성한다:
+
+```text
+src/routes/
+├── (public)/                    ← prerender = true, hooks 안 탐
+│   ├── about/
+│   └── pricing/
+├── (app)/                       ← SSR, hooks에서 쿠키 검사
+│   ├── +layout.server.ts        ← 인증 체크 (이것 하나로 끝)
+│   ├── +layout.svelte           ← 공통 UI (사이드바 등)
+│   ├── dashboard/
+│   │   └── +page.server.ts      ← 인증 걱정 없이 데이터만 load
+│   └── settings/
+│       └── +page.server.ts      ← 여기도 마찬가지
+```
 
 ```ts
-// src/routes/admin/+layout.server.ts
+// routes/(app)/+layout.server.ts
 import { redirect } from '@sveltejs/kit'
 import type { LayoutServerLoad } from './$types'
 
 export const load: LayoutServerLoad = async ({ locals }) => {
-  if (!locals.user?.isAdmin) redirect(302, '/')
-  return { role: 'admin' }
+  if (!locals.user) throw redirect(303, '/login')
+  return { user: locals.user }
 }
 ```
 
-### 레이아웃 단위 권한 분리
+layout에서 한번만 체크하면 하위 모든 page는 인증이 보장된 상태에서 자기 데이터 load만 신경 쓰면 된다. 각 page에서 일일이 인증 체크할 필요 없음.
+
+### 레이아웃 단위 권한 분리 (관리자 등)
 
 ```text
 src/routes/
-├── +layout.server.ts            ← 전체 공통 (루트 레이아웃)
-├── admin/
-│   ├── +layout.server.ts        ← /admin/* 공통 (관리자 권한 체크)
-│   └── +page.server.ts          ← /admin 페이지만
-└── dashboard/
-    └── +page.server.ts          ← /dashboard 페이지만
+├── (app)/
+│   ├── +layout.server.ts        ← 일반 유저 인증
+│   ├── admin/
+│   │   ├── +layout.server.ts    ← /admin/* 관리자 권한 추가 체크
+│   │   └── +page.server.ts
+│   └── dashboard/
+│       └── +page.server.ts
 ```
 
 ### 다중 hooks: `sequence()`
