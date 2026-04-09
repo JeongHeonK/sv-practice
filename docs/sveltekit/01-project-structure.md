@@ -157,6 +157,90 @@ src/lib/
 
 아키텍처 패턴(FSD, Atomic 등)은 SvelteKit과 무관하다. `lib/` 내부 구조는 팀 컨벤션에 맞게 자유롭게 구성한다.
 
+### 프로젝트가 커지면? — feature 기반 분리
+
+중규모 이상에서는 **도메인(feature) 단위**로 묶는 게 일반적이다:
+
+```text
+src/lib/
+├── features/
+│   ├── auth/
+│   │   ├── LoginForm.svelte
+│   │   ├── auth-server.ts
+│   │   └── auth-utils.ts
+│   ├── dashboard/
+│   │   ├── DashboardChart.svelte
+│   │   └── dashboard-server.ts
+│   └── billing/
+│       ├── PricingTable.svelte
+│       └── billing-server.ts
+├── components/            ← 공용 (Button, Modal 등)
+├── server/                ← 공용 서버 (db client 등)
+└── utils/                 ← 공용 유틸
+```
+
+feature 폴더 안에서 **자체 완결**되게 한다. `auth` 관련 코드를 `components/`, `server/`, `utils/` 세 군데 뒤지지 않고 `features/auth/` 하나만 보면 된다.
+
+**깊이 제한**: feature 안에서 하위 폴더는 **2뎁스까지만** 허용하는 게 현실적이다.
+
+```text
+❌ features/auth/components/forms/login/fields/EmailInput.svelte
+✅ features/auth/LoginForm.svelte
+```
+
+파일이 10개 넘어가면 그때 하위 폴더를 만들고, 그 전까지는 플랫하게 간다. IDE 파일 검색(`Cmd+P`)이 폴더 탐색보다 빠르니까, 깊은 구조보다 **파일명을 잘 짓는 게** 더 중요하다.
+
+### routes 레이아웃 그룹
+
+routes도 커지면 `(괄호)` 레이아웃 그룹으로 관심사를 나눈다:
+
+```text
+src/routes/
+├── (auth)/           ← 로그인 불필요 페이지 그룹
+│   ├── login/
+│   └── signup/
+├── (app)/            ← 로그인 필요 페이지 그룹
+│   ├── dashboard/
+│   └── settings/
+└── api/
+    └── webhooks/
+```
+
+`(괄호)` 폴더명은 URL에 포함되지 않는다. 순수하게 **레이아웃 공유 단위**로만 작동한다.
+
+### 페이지 파일은 얇게 유지
+
+페이지(`+page.svelte`)는 **조립만**, 로직은 `$lib`에 위임한다:
+
+```svelte
+<!-- routes/(app)/dashboard/+page.svelte — 조립만 -->
+<script lang="ts">
+  import DashboardChart from '$lib/features/dashboard/DashboardChart.svelte'
+  import StatCards from '$lib/features/dashboard/StatCards.svelte'
+
+  let { data } = $props()
+</script>
+
+<h1>대시보드</h1>
+<StatCards stats={data.stats} />
+<DashboardChart entries={data.entries} />
+```
+
+```ts
+// routes/(app)/dashboard/+page.server.ts — load 호출만
+import { getDashboardData } from '$lib/features/dashboard/dashboard-server'
+
+export const load = async () => {
+  return getDashboardData()
+}
+```
+
+```text
++page.svelte      → 컴포넌트 조립 + 레이아웃 배치만
++page.server.ts   → load 호출만, 로직은 lib에 위임
+$lib/features/    → 실제 비즈니스 로직, 컴포넌트, 서버 코드
+```
+
 ---
 
 ## React/Next.js 비교
