@@ -803,69 +803,10 @@ pnpm add -D @types/nprogress
 
 ---
 
-## 7. 캐싱/무효화 전략
+## 7. 코드 재실행 제어
 
-> **왜 중요한가?**
-> load 함수는 네비게이션마다 재실행된다. `invalidateAll()`은 모든 load를 재실행 → 불필요한 서버 요청.
-> `depends` + `invalidate`로 재실행 범위를 최소화할 수 있다.
-
-### `depends` — load에 의존성 이름 등록
-
-```ts
-// src/routes/(marketing)/blog/+page.server.ts
-export const load: PageServerLoad = async ({ depends, fetch }) => {
-  depends('app:posts')  // 이 load의 의존성 이름 등록
-  const response = await fetch('/api/posts')
-  const data = await response.json()
-  return { posts: data }
-}
-```
-
-### `invalidate` vs `invalidateAll` — 선택적 vs 전체 무효화
-
-```ts
-import { invalidate, invalidateAll } from '$app/navigation'
-
-// 특정 의존성만 무효화 — 'app:posts'에 depends한 load만 재실행
-await invalidate('app:posts')
-
-// 모든 load 재실행 (use:enhance의 기본 동작)
-await invalidateAll()
-```
-
-| 함수 | 재실행 범위 | 사용 시점 |
-|--|--|--|
-| `invalidate('app:posts')` | 해당 의존성 load만 | 게시물 목록 갱신 등 특정 데이터만 |
-| `invalidateAll()` | 모든 load | 로그아웃, 전역 상태 변경 |
-
-### 실전 패턴 — 낙관적 업데이트 후 정확한 무효화
-
-```svelte
-<script lang="ts">
-  import { enhance } from '$app/forms'
-  import { invalidate } from '$app/navigation'
-</script>
-
-<!-- 게시물 삭제 폼 -->
-<form
-  method="POST"
-  action="?/deletePost"
-  use:enhance={() => {
-    return async ({ result, update }) => {
-      if (result.type === 'success') {
-        // 게시물 목록만 재로드 (전체 invalidateAll 대신)
-        await invalidate('app:posts')
-      } else {
-        await update()
-      }
-    }
-  }}
->
-  <button type="submit">삭제</button>
-</form>
-```
-
-`use:enhance`의 커스텀 콜백에서 `invalidateAll()` 대신 `invalidate('app:posts')`를 사용하면 게시물 목록 load만 재실행된다. 다른 load 함수(예: 사용자 정보, 레이아웃 데이터)는 재실행되지 않아 불필요한 서버 요청을 줄인다.
+> `depends()` + `invalidate()`로 load 재실행 범위를 최소화한다.
+> Form Actions에서의 실전 패턴 포함 → [07-load-invalidation.md](./07-load-invalidation.md) 참조
 
 ---
 
