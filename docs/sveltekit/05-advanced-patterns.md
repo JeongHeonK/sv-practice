@@ -536,11 +536,11 @@ async function fetchComments(fetch: typeof globalThis.fetch, id: string): Promis
 }
 
 export const load: PageLoad = async ({ fetch, params }) => {
-  // ❌ 순차 실행 (waterfall) — 댓글은 게시물 로드 완료까지 대기
+  // ⚠️ 순차 실행 (waterfall) — 동작은 하지만 느림 (댓글이 게시물 완료까지 대기)
   // const post = await fetchPost(fetch, params.id)
   // const comments = await fetchComments(fetch, params.id)
 
-  // ✅ 병렬 실행 — 두 요청 동시 시작
+  // ✅ 병렬 실행 — 두 요청 동시 시작 (권장)
   const [post, comments] = await Promise.all([
     fetchPost(fetch, params.id),
     fetchComments(fetch, params.id)
