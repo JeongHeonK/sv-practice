@@ -1,7 +1,7 @@
 # SvelteKit 고급 훅
 
 resolve 옵션, handleFetch, reroute, transport 등 고급/특수 훅.
-기본 훅(handle, locals, handleError)은 [05-hooks.md](05-hooks.md)를 참고한다.
+기본 훅(handle, locals, handleError)은 [02-core.md Section 5](02-core.md#5-hooksserverts--앱-전역-미들웨어)를 참고한다.
 
 ---
 
@@ -256,6 +256,105 @@ transport.Rect.decode([0, 0, 100, 50])
   ▼
 컴포넌트에서 data.rect.area 등 메서드 사용 가능
 ```
+
+---
+
+## 5. handleError — 서버 & 클라이언트
+
+> handleError 기본 개념(expected vs unexpected, 로깅 vs 사용자 메시지)은 [02-core.md Section 7](02-core.md#7-에러-처리)을 참고한다.
+
+### 클라이언트 handleError
+
+```ts
+// src/hooks.client.ts
+import type { HandleClientError } from '@sveltejs/kit'
+
+export const handleError: HandleClientError = async ({ error, status, message }) => {
+  // ⚠️ 서버와 다른 점: event가 NavigationEvent (params, route, url만 있음)
+  // cookies, locals, fetch 등 서버 전용 속성 없음
+
+  console.error('Unexpected client error:', error)
+
+  return {
+    message: '예기치 않은 클라이언트 오류가 발생했습니다',
+    code: 'UNEXPECTED_CLIENT_ERROR'
+  }
+}
+```
+
+### 서버 오류 vs 클라이언트 오류 발생 시점
+
+- **SSR 오류** (+page.server.ts 등) → `hooks.server.ts`의 handleError → 터미널 로그
+- **클라이언트 오류** (+page.ts 등, 브라우저 실행) → `hooks.client.ts`의 handleError → 브라우저 콘솔 로그
+
+> `handleError`를 정의하면 **기본 로깅이 사라짐** — 직접 `console.error` 해야 한다.
+
+### 레이아웃 오류의 특수 동작
+
+**레이아웃 load 함수에서 오류가 발생하면**, 같은 레벨의 `+error.svelte`가 아닌 **상위 레벨의 `+error.svelte`**가 사용된다:
+
+```text
+(marketing)/+layout.server.ts 에서 오류 발생
+  → (marketing)/+error.svelte    ❌ 사용되지 않음 (같은 레벨)
+  → routes/+error.svelte         ✅ 상위 레벨 사용
+```
+
+> 이유: 레이아웃에 오류가 있으면 같은 레벨의 오류 페이지도 그 레이아웃에 의존하므로 렌더링할 수 없다.
+
+---
+
+## 6. init 훅 — 1회 초기화
+
+`init`은 서버 시작 시(`hooks.server.ts`) 또는 앱 첫 로드 시(`hooks.client.ts`) **1번만** 실행된다.
+
+```ts
+// src/hooks.server.ts
+export const init = async () => {
+  // DB 연결 풀 초기화, 캐시 워밍 등
+  await connectDatabase()
+}
+```
+
+```ts
+// src/hooks.client.ts
+export const init = async () => {
+  // 애널리틱스 초기화 등
+  initAnalytics()
+}
+```
+
+---
+
+## 7. 경로 보호 전략 비교
+
+> 기본 패턴(layout.server.ts 인증 가드)은 [02-core.md Section 5](02-core.md#5-hooksserverts--앱-전역-미들웨어)를 참고한다.
+
+**전략 A: handle에서 중앙 집중 체크** — 한 곳에서 보호 경로를 일괄 체크. 빠뜨릴 위험 없지만 조건이 많아질 수 있다.
+
+```ts
+// src/hooks.server.ts
+export const handle: Handle = async ({ event, resolve }) => {
+  event.locals.user = await getSession(event.cookies.get('token'))
+
+  if (!event.locals.user && event.url.pathname.startsWith('/app')) {
+    redirect(303, '/login')
+  }
+
+  return await resolve(event)
+}
+```
+
+**전략 B: 개별 페이지 load에서 분산 체크** — handle에서는 locals만 주입하고, 각 페이지 load에서 체크.
+
+```ts
+// src/routes/(app)/dashboard/+page.server.ts
+export const load: PageServerLoad = async ({ locals }) => {
+  if (!locals.user) redirect(303, '/login')
+  return { dashboard: await getDashboard(locals.user.id) }
+}
+```
+
+> 장점: 페이지별 세밀한 제어 / 단점: 보호할 페이지마다 추가 필요 (빠뜨리면 보안 구멍)
 
 ---
 

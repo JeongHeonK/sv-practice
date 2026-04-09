@@ -658,16 +658,18 @@ src/routes/(marketing)/
 
 | | Next.js | SvelteKit |
 |--|--|--|
-| 선택적 파라미터 | `[[...slug]]` (catch-all만) | `[[param]]` (단일도 가능) |
-| 단일 선택적 세그먼트 | 공식 지원 없음 | `[[param]]`으로 지원 |
+| 선택적 단일 파라미터 | 공식 지원 없음 | `[[param]]`으로 지원 |
+| 선택적 catch-all | `[[...slug]]` | `[[...rest]]` |
+
+Next.js에서 `/about`과 `/en/about`을 하나의 라우트로 처리하려면 `[[...slug]]`로 감싸고 내부에서 분기해야 한다. SvelteKit은 `[[lang]]` 하나로 단일 세그먼트만 선택적으로 만들 수 있다.
 
 ---
 
 ## 12. 파라미터 매처 — `[param=matcher]`
 
-### 문제: 동적 ��라미터가 너무 많은 것을 받아들일 때
+### 문제: 동적 파라라미터가 너무 많은 것을 받아들일 때
 
-`(auth)/[authType]/+page.svelte`는 `/login`, `/register`뿐 아니라 `/anything`도 매칭한다. 허용되지 않는 ��에 대해 404를 반환해야 한다.
+`(auth)/[authType]/+page.svelte`는 `/login`, `/register`뿐 아니라 `/anything`도 매칭한다. 허용되지 않는 경로에 대해 404를 반환해야 한다.
 
 ### 매처 함수 정의
 
