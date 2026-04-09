@@ -517,6 +517,58 @@ src/routes/
 | 파라미터 접근 | `useParams()` 또는 `params` prop | `page.params.id` |
 | 반응성 | Hook이 자동 리렌더 | `$derived` 또는 템플릿 직접 참조 |
 
+### `route.id`로 현재 라우트 판별
+
+load 함수에서 `route.id`를 사용하면 **현재 어떤 라우트 패턴에 있는지** 확인할 수 있다. 공유 레이아웃에서 라우트에 따라 다른 로직을 실행할 때 유용하다.
+
+```text
+src/routes/(app)/(workspace)/
+├── +layout.server.ts          ← 공유 레이아웃 (사이드바)
+├── w/[wId]/+page.svelte       ← /w/123  (워크스페이스)
+└── p/[pId]/+page.svelte       ← /p/456  (페이지)
+```
+
+```ts
+// (workspace)/+layout.server.ts
+export const load: LayoutServerLoad = async ({ params, route }) => {
+  // route.id = "/(app)/(workspace)/w/[wId]" 또는 "/(app)/(workspace)/p/[pId]"
+  const isPage = route.id.startsWith('/(app)/(workspace)/p/');
+
+  // 라우트에 따라 다른 파라미터에서 워크스페이스 ID 추출
+  const workspaceId = isPage
+    ? await getWorkspaceIdFromPageId(params.pId!)  // 페이지 → DB 조회 필요
+    : params.wId!;                                   // 워크스페이스 → 직접 사용
+
+  // 이하 공통 로직...
+};
+```
+
+> `route.id`는 파일 시스템 경로 패턴이다 — 그룹명(`(app)`)과 파라미터 자리(`[wId]`)가 그대로 포함된다. 실제 URL이 아닌 **라우트 정의**를 반환한다는 점에 주의.
+
+### ⚠️ `route.id`는 자동 의존성이 된다 — `untrack` 활용
+
+`route.id`를 load 함수에서 읽으면 **의존성으로 등록**되어, 같은 레이아웃 내에서 하위 라우트를 전환할 때마다 load가 불필요하게 재실행된다.
+
+```ts
+// ❌ 탭 전환(pages → members → settings)마다 레이아웃 load 재실행
+export const load: LayoutServerLoad = async ({ params, route }) => {
+  const isPage = route.id.startsWith('/(app)/(workspace)/p/');  // route.id 의존성 등록!
+  const workspaceId = isPage ? await getWorkspaceIdFromPageId(params.pId!) : params.wId!;
+  // ...DB 쿼리 (불필요하게 반복 실행)
+};
+```
+
+```ts
+// ✅ untrack으로 route.id 의존성 제거 — 탭 전환 시 재실행 안 됨
+export const load: LayoutServerLoad = async ({ params, route, untrack }) => {
+  const isPage = untrack(() => route.id.startsWith('/(app)/(workspace)/p/'));
+  const workspaceId = isPage ? await getWorkspaceIdFromPageId(params.pId!) : params.wId!;
+  // ...DB 쿼리 (최초 1회만 실행)
+};
+```
+
+> 레이아웃 하위에 탭형 라우트(`/settings`, `/members` 등)가 있을 때, 레이아웃 데이터가 탭과 무관하다면 `untrack`으로 불필요한 재실행을 방지한다.
+
 ---
 
 ## 10. 레스트 파라미터 — `[...param]`

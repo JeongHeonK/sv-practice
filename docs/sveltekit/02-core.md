@@ -82,6 +82,30 @@ export const handle: Handle = async ({ event, resolve }) => {
 
 이후 모든 `load` 함수에서 `event.locals.user`로 접근 가능. **요청 단위 전역 저장소** 역할.
 
+### `app.d.ts`에서 `App.Locals` 타입 선언
+
+`event.locals`에 넣을 데이터의 타입을 `src/app.d.ts`에서 정의해야 TypeScript가 인식한다.
+
+```ts
+// src/app.d.ts
+import type { users } from '$lib/server/schema';
+
+declare global {
+  namespace App {
+    interface Locals {
+      session: {
+        user: typeof users.$inferSelect;  // Drizzle 스키마에서 타입 추론
+        session: string;
+      } | null;
+    }
+  }
+}
+
+export {};
+```
+
+> `typeof 테이블.$inferSelect`는 Drizzle ORM에서 SELECT 결과 타입을 추론하는 패턴이다. Prisma를 쓴다면 `Prisma.UserGetPayload<{}>` 등으로 대체한다. 핵심은 **DB 스키마와 `App.Locals` 타입을 동기화**하는 것.
+
 ```text
 hooks.server.ts에서 쿠키 검사 (한번만)
   → event.locals.user에 저장
