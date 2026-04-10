@@ -105,26 +105,7 @@ const config = {
 
 ## 5. 환경 변수 (`$env`)
 
-SvelteKit은 환경 변수를 4개 모듈로 제공한다.
-
-| | Static (빌드 시 치환) | Dynamic (런타임 읽기) |
-|--|--|--|
-| **Private** (서버 전용) | `$env/static/private` | `$env/dynamic/private` |
-| **Public** (클라이언트 노출 가능) | `$env/static/public` | `$env/dynamic/public` |
-
-`PUBLIC_` 접두사 규칙: public 모듈에 노출하려면 변수명이 `PUBLIC_`으로 시작해야 한다.
-
-```ts
-// +page.server.ts (서버 전용)
-import { DATABASE_URL } from '$env/static/private'
-
-// +page.svelte (클라이언트 노출 가능)
-import { PUBLIC_API_URL } from '$env/static/public'
-```
-
-> `.env` 파일은 개발 환경에서 자동 로드된다. 프로덕션 환경 변수는 배포 플랫폼(Vercel, Node 등)에서 설정한다.
-
-**실무 팁**: 대부분의 경우 `static` 모듈이면 충분하다. `dynamic`은 빌드 없이 런타임에 변수를 바꿔야 하는 경우(예: 컨테이너 환경)에 사용한다.
+> $env 모듈 상세 → [08-env-server-modules.md](./08-env-server-modules.md)
 
 ---
 

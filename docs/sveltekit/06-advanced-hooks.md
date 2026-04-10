@@ -3,6 +3,30 @@
 resolve 옵션, handleFetch, reroute, transport 등 고급/특수 훅.
 기본 훅(handle, locals, handleError)은 [02-core.md Section 5](02-core.md#5-hooksserverts--앱-전역-미들웨어)를 참고한다.
 
+### 훅 실행 순서
+
+```
+HTTP 요청
+   │
+   ▼
+init()             ← 서버 시작 시 1회만 (DB 연결 등)
+   │
+   ▼
+handle()           ← 모든 요청 진입점 (인증, 로깅)
+   │
+   ├─ reroute()    ← URL 매칭 전 경로 재작성 (hooks.ts, 유니버설)
+   │
+   ├─ resolve()    ← 라우트 매칭 → 렌더링
+   │   │
+   │   └─ load 함수 실행
+   │       │
+   │       └─ handleFetch()  ← load 내 fetch 호출 시만 (서버 실행 시)
+   │
+   └─ handleError()← 서버/클라이언트 에러 발생 시
+```
+
+> `reroute`와 `transport`는 `hooks.ts`(유니버설), 나머지는 `hooks.server.ts` 또는 `hooks.client.ts`에 정의한다.
+
 ---
 
 ## 1. resolve 옵션 — transformPageChunk, preload, filterSerializedResponseHeaders
@@ -368,3 +392,17 @@ export const load: PageServerLoad = async ({ locals }) => {
 | `init` | `.server.ts` + `.client.ts` | 공유 | 초기화 (서버 시작 / 앱 첫 로드) |
 | `reroute` | `hooks.ts` | 유니버설 | URL → 경로 매칭 변경 |
 | `transport` | `hooks.ts` | 유니버설 | 직렬화 불가 데이터 인코딩/디코딩 |
+
+---
+
+## React/Next.js 비교
+
+| SvelteKit | React/Next.js | 차이점 |
+|-----------|--------------|-------|
+| `handle` (hooks.server.ts) | `middleware.ts` | handle은 응답까지 조작 가능, middleware는 요청만 |
+| `reroute` (hooks.ts) | `next.config.js` rewrites | reroute는 런타임 함수, rewrites는 빌드타임 설정 |
+| `handleError` + `+error.svelte` | `error.tsx` (Error Boundary) | SvelteKit은 서버/클라이언트 handleError 분리 |
+| `handleFetch` | 없음 | 서버 fetch 가로채기는 SvelteKit 고유 기능 |
+| `transport` | 없음 (RSC의 직렬화는 자동) | 클래스 인스턴스 등 커스텀 직렬화 제어 |
+| `init` | 없음 (`instrumentation.ts` 유사) | 서버/클라이언트 각각 1회 초기화 |
+| `resolve` 옵션 | 없음 | HTML 변환, 프리로드 필터 등 세밀 제어 |
