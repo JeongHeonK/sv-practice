@@ -155,6 +155,67 @@ let posts: Post[] = $derived(data.posts.posts)
 
 URL 파라미터에 의존하는 상태는 `$state` 대신 `$derived`로 선언해야 페이지 이동 시 올바르게 초기화된다.
 
+### "제로 UI" 철학 — JS 없이도 동작하는 UX
+
+**제로 UI**란 JavaScript가 전혀 없어도 핵심 UX가 동작하는 구현 원칙이다. SvelteKit Form Actions는 순수 HTML `<form>`을 그대로 사용하므로, JS 비활성화 환경에서도 서버 액션이 실행된다.
+
+#### 왜 중요한가
+
+방운영 AI 제품에서는 다음 환경을 전제해야 한다:
+- 불안정한 네트워크 — JS 번들 로드 실패 가능
+- 다양한 기기 — 저사양 기기에서 JS 파싱 비용이 큼
+- 접근성 요구 — 스크린 리더·보조기기 환경
+
+#### `use:enhance` 없을 때 vs 있을 때 동작 비교
+
+```text
+JS 없을 때 (순수 HTML form):
+  form POST → Server Action → redirect/data 반환 → 전체 페이지 새로고침
+
+JS 있을 때 (use:enhance):
+  form submit → 인터셉트 → fetch POST → Server Action → 부분 업데이트
+```
+
+코드 레벨에서는 `use:enhance` 한 줄 차이다:
+
+```svelte
+<!-- JS 없어도 동작 (제로 UI) -->
+<form method="POST" action="?/createMessage">
+  <input name="content" />
+  <button type="submit">전송</button>
+</form>
+```
+
+```svelte
+<!-- JS 있으면 향상 (Progressive Enhancement) -->
+<script>
+  import { enhance } from '$app/forms'
+</script>
+
+<form method="POST" action="?/createMessage" use:enhance>
+  <input name="content" />
+  <button type="submit">전송</button>
+</form>
+```
+
+`use:enhance`를 인자 없이 사용하면 브라우저 기본 동작을 에뮬레이션하면서 전체 페이지 새로고침을 방지한다. JS가 없으면 브라우저가 직접 form을 POST하여 동일한 서버 액션이 실행된다.
+
+#### GraphQL mutation과 제로 UI의 경계
+
+| 방식 | JS 의존 | 제로 UI |
+|--|--|--|
+| Form Actions (`method="POST"`) | 선택적 | 가능 |
+| Houdini GraphQL mutation | 필수 | 불가 |
+
+Houdini GraphQL mutation은 JS 런타임이 필요하므로 제로 UI를 보장할 수 없다. **실무 권장 전략**:
+
+```text
+Primary:   Form Actions (제로 UI 보장)
+Enhancement: use:enhance → GraphQL mutation으로 부분 업데이트
+```
+
+JS 필수 기능의 fallback이 필요할 때는 폼 기반 action을 primary로, JS mutation을 enhancement로 배치한다.
+
 ---
 
 ## 5. 병렬 실행 & 스트리밍
