@@ -138,18 +138,34 @@ import { API_SECRET } from '$env/static/private';
 
 ---
 
-## 4. Next.js와 비교
+## 4. `$app/environment` — 실행 컨텍스트 플래그
 
-| 특성 | SvelteKit | Next.js |
+환경 변수와 달리 **SvelteKit이 제공하는 런타임 플래그**. 코드가 어느 상황에서 실행되는지 감지한다.
+
+```ts
+import { browser, dev, building } from '$app/environment'
+```
+
+| 플래그 | 설명 | 주요 용도 |
 |---|---|---|
-| **공개 접두사** | `PUBLIC_` | `NEXT_PUBLIC_` |
-| **비공개** | 접두사 없음 (기본) | 접두사 없음 |
-| **모듈 시스템** | 4개 전용 모듈 (`$env/*`) | `process.env` 단일 접근 |
-| **빌드 vs 런타임** | `static` / `dynamic` 명시적 선택 | `NEXT_PUBLIC_`만 빌드 타임 인라인 |
-| **잘못된 접근 방지** | 빌드 에러로 차단 | 서버 변수는 클라이언트에서 `undefined` (에러 없음) |
-| **접두사 커스터마이징** | `svelte.config.js`에서 가능 | 불가 |
+| `browser` | 브라우저에서 실행 중이면 `true` | `window` 접근, 클라이언트 전용 로직 분기 |
+| `dev` | 개발 모드이면 `true` | 쿠키 `secure: !dev`, 디버그 로그 |
+| `building` | `npm run build` 빌드 중이면 `true` | prerender 중 DB/동적 env 접근 방지 |
 
-> SvelteKit이 더 안전한 이유: Next.js는 서버 전용 변수를 클라이언트에서 접근하면 조용히 `undefined`가 되지만, SvelteKit은 **빌드 에러**를 발생시켜 실수를 원천 차단한다.
+### `building` 플래그 — prerender 빌드 시 DB 초기화 방지
+
+`prerender = true` 라우트가 있으면 빌드 시 해당 페이지를 실행한다. 이때 동적 환경 변수(`$env/dynamic/*`)를 읽으면 에러가 발생한다.
+
+```ts
+// src/lib/server/db.ts
+import { building } from '$app/environment'
+import { env } from '$env/dynamic/private'
+
+// 빌드 중에는 DB 초기화 건너뜀
+export const db = building ? null : createPool(env.DATABASE_URL)
+```
+
+> `$lib/server/` 안의 유틸 함수가 `$app/server`의 `getRequestEvent()` 등을 사용하면 서버 전용 함수다. 클라이언트에서 import 가능한 `$lib/utils.ts`에 넣으면 빌드 에러 발생 — 반드시 `$lib/server/`에 배치해야 한다.
 
 ---
 
@@ -164,7 +180,7 @@ import { API_SECRET } from '$env/static/private';
 
 ---
 
-## 5. 서버 전용 모듈 — `*.server.ts` & `$lib/server/`
+## 6. 서버 전용 모듈 — `*.server.ts` & `$lib/server/`
 
 환경 변수뿐 아니라 **모듈 자체를 서버 전용으로 제한**할 수 있다. DB 연결, 파일 시스템 접근 등 서버에서만 실행되어야 하는 코드를 클라이언트 번들에서 완전히 격리한다.
 
@@ -248,12 +264,18 @@ const SECRET_KEY = 'sk_live_abc123';  // ❌ 절대 하지 말 것!
 import { SECRET_KEY } from '$env/static/private';
 ```
 
-### Next.js와 비교
+---
+
+## React/Next.js 비교
 
 | 특성 | SvelteKit | Next.js |
 |---|---|---|
-| **서버 전용 파일** | `*.server.ts` 또는 `$lib/server/` | `'use server'` 디렉티브 (Server Actions) |
+| **공개 접두사** | `PUBLIC_` | `NEXT_PUBLIC_` |
+| **비공개** | 접두사 없음 (기본) | 접두사 없음 |
+| **모듈 시스템** | 4개 전용 모듈 (`$env/*`) | `process.env` 단일 접근 |
+| **빌드 vs 런타임** | `static` / `dynamic` 명시적 선택 | `NEXT_PUBLIC_`만 빌드 타임 인라인 |
+| **잘못된 접근 방지** | 빌드 에러로 차단 | 서버 변수는 클라이언트에서 `undefined` |
+| **접두사 커스터마이징** | `svelte.config.js`에서 가능 | 불가 |
+| **서버 전용 파일** | `*.server.ts` 또는 `$lib/server/` | `'use server'` 디렉티브 |
 | **서버 전용 import 차단** | 빌드 에러 | `server-only` 패키지 수동 설치 필요 |
 | **보호 수준** | 프레임워크 내장 (자동) | 명시적 설정 필요 (`import 'server-only'`) |
-
-> SvelteKit은 파일명/폴더 컨벤션만으로 서버 전용 코드를 보호한다. Next.js는 `server-only` 패키지를 별도 설치하고 각 파일 상단에 `import 'server-only'`를 추가해야 동일한 보호를 받는다.
