@@ -1,613 +1,255 @@
-# Load 함수 재실행 & 프리로딩
+# Load 무효화 (Invalidation)
 
-load 함수가 언제 자동으로 재실행되며, 어떻게 직접 재실행을 트리거하는가.
-링크 호버 시 데이터를 미리 로드하는 프리로딩 전략.
-
----
-
-## 1. 실험 환경 구성 — 블로그 상세 페이지 + 사이드바
-
-load 함수의 재실행 타이밍을 관찰하기 위해, 여러 레벨의 load 함수가 **동시에 활성화**되는 구조를 만든다.
-
-```text
-src/routes/
-├── +layout.server.ts                       ← 루트 레이아웃 load
-├── (marketing)/
-│   ├── +layout.server.ts                   ← 마케팅 그룹 load
-│   └── blog/
-│       └── [id]/
-│           ├── +layout.server.ts           ← 사이드바용 load
-│           └── +page.server.ts             ← 단일 게시물 load
-```
-
-4개의 load 함수가 하나의 경로에서 **동시에 실행**될 수 있는 구조다. 각 load에 `console.log`를 추가하면 네비게이션 시 **어떤 load가 재실행되는지** 서버 터미널에서 관찰할 수 있다.
-
-> **핵심 질문**: 같은 경로 그룹 내에서 페이지를 이동하면, 4개의 load 함수 중 어떤 것이 재실행될까? → 아래에서 확인.
+load 함수의 재실행 조건과 수동 무효화 메커니즘. `depends()`, `invalidate()`, `invalidateAll()` 사용 방법.
 
 ---
 
-## 2. 자동 재실행 — SvelteKit의 종속성 추적
+## 1. Load 무효화란
 
-SvelteKit은 load 함수 내부에서 **어떤 값을 참조했는지** 자동으로 추적하여 종속성 맵을 생성한다. 해당 종속성이 변경되면 load 함수가 자동으로 재실행된다.
+SvelteKit의 load 함수는 **자동으로** 다음 상황에서 재실행된다.
 
-```text
-params.id 변경: /blog/1 → /blog/2
+- 참조한 `params` 값이 변경된 경우 (예: `/blog/[id]`의 `id` 변경)
+- 참조한 `url.pathname`, `url.search` 등이 변경된 경우
+- `await parent()`를 호출했고 부모 load가 재실행된 경우
+- `fetch(url)`로 요청한 URL이 무효화된 경우 (universal load만)
 
-  routes/+layout.server.ts       ── ❌ params 미참조 → 재실행 안 됨
-  (marketing)/+layout.server.ts  ── ❌ params 미참조 → 재실행 안 됨
-  [id]/+layout.server.ts         ── ❌ params 미참조 → 재실행 안 됨
-  [id]/+page.server.ts           ── ✅ params.id 참조 → 재실행
-```
+자동 재실행이 **발생하지 않는** 경우:
 
-### 종속성 1: `params` — 경로 매개변수
+- 외부 데이터가 변경되었지만 URL이나 params는 그대로인 경우
+- 다른 컴포넌트의 사용자 액션으로 서버 데이터가 바뀐 경우
+- 주기적으로 최신 데이터를 유지해야 하는 경우
 
-```ts
-// src/routes/(marketing)/blog/[id]/+page.server.ts
-export const load: PageServerLoad = async ({ params }) => {
-  console.log('[id] page load')
-  const post = posts.find((p) => p.id === Number(params.id))
-  return { post }
-}
-```
-
-`/blog/1` → `/blog/2`로 이동하면:
-- **경로(`route.id`)는 동일** — 여전히 `(marketing)/blog/[id]`
-- **`params.id`가 변경** — `1` → `2`
-- `params.id`를 참조한 **페이지 load만 재실행**, 레이아웃 load는 실행되지 않음
+이런 시나리오에서는 **수동 무효화**가 필요하다.
 
 ```text
-# 사이드바에서 다른 게시물 클릭 시 서버 로그
-[id] page load          ← ✅ params.id 의존 → 재실행
-                        ← ❌ 레이아웃 load 3개는 실행 안 됨
+자동 재실행 트리거:
+  params 변경  ─┐
+  url 변경     ─┼─→  load 재실행
+  부모 load    ─┘
+
+수동 재실행 트리거:
+  invalidate(key)     ─┐
+  invalidateAll()     ─┴─→  load 재실행
 ```
 
-> **중요**: 같은 경로 내 네비게이션에서는 컴포넌트가 **언마운트/재마운트되지 않는다**. `data` props만 업데이트된다. 따라서 `data`에 의존하는 값은 반드시 `$derived`로 선언해야 한다.
-
-### 레이아웃 load에서 params를 참조하면?
-
-```ts
-// src/routes/(marketing)/blog/[id]/+layout.server.ts
-export const load: LayoutServerLoad = async ({ params }) => {
-  console.log('[id] layout load')
-  console.log(params.id)  // ⚠️ params.id 참조 → 종속성 등록!
-
-  const morePosts = posts.slice(0, 3)
-  return { morePosts }
-}
-```
-
-`params.id`를 단순히 로깅만 해도 **종속성으로 등록**된다. 이제 게시물 전환 시:
-
-```text
-[id] layout load        ← 😱 불필요한 재실행! morePosts는 변하지 않는데...
-[id] page load
-```
-
-사이드바 데이터(`morePosts`)는 `id`와 무관한데, 로깅 때문에 매번 다시 fetching하게 된다.
-
-> **tip**: 종속성 등록 없이 값을 사용해야 할 때는 `untrack(() => params.id)`로 감싼다. 이 load가 사용하는 값인데 변경에 반응하지 않길 원할 때만 사용하는 드문 케이스다. 키 형식은 반드시 `접두사:이름`(콜론 포함).
-
-### 종속성 2: `url.searchParams` — 검색 매개변수
-
-```ts
-// src/routes/(marketing)/blog/+page.server.ts
-export const load: PageServerLoad = async ({ url }) => {
-  console.log('blog page load')
-  const page = Number(url.searchParams.get('page') ?? '1')
-  // page 기반으로 게시물 로드...
-  return { posts: paginatedPosts }
-}
-```
-
-- `/blog?page=1` → `/blog?page=2`: **`page` 검색 매개변수를 참조**하므로 load 재실행
-- `/blog?page=1` → `/blog?page=1&x=123`: `x`는 load에서 참조하지 않으므로 **재실행 안 됨**
-
-```text
-# ?page=2 클릭 시
-blog page load          ← ✅ url.searchParams.get('page') 의존
-
-# ?x=123 추가 시
-                        ← ❌ 실행 안 됨 (x를 참조하지 않음)
-```
-
-**SvelteKit은 참조한 검색 매개변수만 추적한다.** 관련 없는 매개변수 변경에는 반응하지 않는다.
-
-### 종속성 3: `await parent()` — 부모 load 의존
-
-```ts
-// src/routes/(marketing)/blog/[id]/+page.server.ts
-export const load: PageServerLoad = async ({ params, parent }) => {
-  await parent()  // ⚠️ 부모 load에 대한 종속성 등록
-  console.log('[id] page load')
-  const post = posts.find((p) => p.id === Number(params.id))
-  return { post }
-}
-```
-
-`await parent()`를 호출하면 **양방향 종속성**이 생긴다:
-
-1. **이 load가 재실행되면 → 부모 load도 먼저 재실행** (부모 데이터 최신화를 위해)
-2. **부모 load가 재실행되면 → 이 load도 재실행** (의존하고 있으므로)
-
-```text
-# 게시물 전환 시 (params.id 변경)
-root layout load        ← 😱 부모 전부 재실행
-marketing layout load   ← 😱
-[id] layout load        ← 😱
-[id] page load          ← params.id 의존 + parent() 의존
-```
-
-> **주의**: `await parent()`는 필요한 경우에만 사용할 것. 무분별한 사용은 **모든 부모 load의 불필요한 재실행**을 유발한다.
-
-### 자동 재실행 종속성 요약
-
-| 종속성 | 변경 조건 | 재실행 범위 |
-|--------|----------|------------|
-| `params.*` | URL 매개변수 변경 (`/blog/1` → `/blog/2`) | 해당 param을 참조한 load만 |
-| `url.searchParams` | 검색 매개변수 변경 (`?page=1` → `?page=2`) | 해당 param을 참조한 load만 |
-| `await parent()` | 부모 load 재실행 시 | 자신 + 모든 부모 load |
-| `fetch(url)` | URL이 바뀌면 | 해당 load (다음 섹션에서 상세) |
-
-> **핵심**: SvelteKit은 load 함수의 종속성을 자동 추적하여, **필요한 load만 최소한으로 재실행**한다.
+> 재실행 시 컴포넌트는 **다시 생성되지 않는다** — `data` prop만 업데이트된다. 컴포넌트 내부 상태(입력 필드 값 등)는 그대로 유지된다.
 
 ---
 
-## 3. 수동 무효화 — `invalidateAll()`, `invalidate()`, `depends()`
+## 2. `depends()` — 커스텀 키 등록
 
-자동 종속성 추적만으로 부족할 때, 직접 load 함수를 다시 실행하는 방법.
+load 함수 안에서 `depends()`를 호출하면, 이 load가 해당 키에 **의존한다고 등록**된다. 나중에 `invalidate(key)`를 호출하면 이 load가 재실행된다.
 
-### `invalidateAll()` — 전부 재실행
+```typescript
+// +page.ts
+import type { PageLoad } from './$types'
+
+export const load: PageLoad = async ({ fetch, depends }) => {
+  depends('app:messages')  // 커스텀 키 등록
+
+  const messages = await fetch('/api/messages').then(r => r.json())
+  return { messages }
+}
+```
+
+### 키 명명 규칙
+
+커스텀 키는 **소문자 알파벳 + 콜론** 접두사 형식(`[a-z]:`)이어야 한다.
+
+```text
+올바른 예:
+  app:messages
+  data:user-profile
+  cache:products
+
+잘못된 예:
+  messages          <- 접두사 없음
+  APP:messages      <- 대문자 불가
+  /api/messages     <- URL 형식은 depends()가 아닌 fetch()로 자동 등록
+```
+
+### 여러 키 등록
+
+한 load 함수에 여러 키를 등록할 수 있다.
+
+```typescript
+export const load: PageLoad = async ({ fetch, depends }) => {
+  depends('app:messages')
+  depends('app:user')
+
+  // 두 키 중 하나만 invalidate되어도 이 load가 재실행됨
+  const [messages, user] = await Promise.all([
+    fetch('/api/messages').then(r => r.json()),
+    fetch('/api/user').then(r => r.json()),
+  ])
+  return { messages, user }
+}
+```
+
+> universal load(`+page.ts`)에서 `fetch(url)`을 호출하면 해당 URL이 자동으로 의존성으로 등록된다. server load(`+page.server.ts`)는 **자동 등록되지 않는다** — 민감한 URL이 클라이언트에 노출될 수 있기 때문이다. server load에서 수동 무효화가 필요하면 반드시 `depends()`로 커스텀 키를 등록해야 한다.
+
+---
+
+## 3. `invalidate()` — 특정 load만 재실행
+
+`$app/navigation`에서 가져온 `invalidate()`는 **해당 키 또는 URL에 의존하는 load만** 재실행한다.
 
 ```svelte
-<!-- src/routes/(marketing)/blog/[id]/+page.svelte -->
-<script lang="ts">
-  import { invalidateAll } from '$app/navigation'
-</script>
-
-<button onclick={() => invalidateAll()}>
-  Reload
-</button>
-```
-
-현재 페이지에서 **활성화된 모든 load 함수**를 재실행한다.
-
-```text
-# /blog/1에서 Reload 클릭 시
-root layout load        ← 재실행
-marketing layout load   ← 재실행
-[id] layout load        ← 재실행
-[id] page load          ← 재실행
-```
-
-간단하지만, 루트 레이아웃처럼 **변경될 일이 없는 데이터까지 전부 다시 로드**하므로 과도할 수 있다.
-
-### `invalidate(url)` — 특정 URL에 의존하는 load만 재실행
-
-```svelte
+<!-- +page.svelte -->
 <script lang="ts">
   import { invalidate } from '$app/navigation'
-  import { page } from '$app/state'
-</script>
+  import type { PageProps } from './$types'
 
-<button onclick={() => invalidate(`https://dummyjson.com/posts/${page.params.id}`)}>
-  Reload
-</button>
-```
+  let { data }: PageProps = $props()
 
-`invalidate()`에 URL을 전달하면, **해당 URL을 `fetch()`한 load 함수만** 재실행된다.
-
-#### ⚠️ Universal load에서만 동작
-
-```ts
-// ✅ +page.ts (Universal load) — fetch URL이 종속성으로 등록됨
-export const load: PageLoad = async ({ fetch, params }) => {
-  const res = await fetch(`https://dummyjson.com/posts/${params.id}`)
-  // fetch URL → 자동 종속성 등록
-  return { post: await res.json() }
-}
-
-// ❌ +page.server.ts (Server load) — fetch URL이 종속성으로 등록 안 됨
-export const load: PageServerLoad = async ({ fetch, params }) => {
-  const res = await fetch(`https://dummyjson.com/posts/${params.id}`)
-  // 서버 전용이므로 클라이언트에서 URL 추적 불가
-  return { post: await res.json() }
-}
-```
-
-**Server load의 fetch는 종속성으로 추적되지 않는다.** 비밀 URL이 클라이언트에 노출되면 안 되기 때문이다.
-
-#### URL은 정확히 일치해야 한다
-
-```ts
-// ✅ 동작 — 정확히 동일한 URL
-invalidate('https://dummyjson.com/posts/1')
-
-// ❌ 동작 안 함 — 뒤에 슬래시 추가
-invalidate('https://dummyjson.com/posts/1/')
-```
-
-#### 함수로 유연하게 매칭
-
-정확한 URL 대신 **함수를 전달**하여 유연하게 매칭할 수 있다.
-
-```svelte
-<script lang="ts">
-  import { invalidate } from '$app/navigation'
-</script>
-
-<button onclick={() => invalidate((url) => {
-  // url: load 함수가 fetch한 모든 URL이 순서대로 전달됨
-  return url.hostname === 'dummyjson.com'
-      && url.pathname.startsWith('/posts')
-})}>
-  Reload
-</button>
-```
-
-조건에 `true`를 반환하면 해당 URL에 의존하는 load 함수가 재실행된다.
-
-### `depends()` — 커스텀 종속성 키 (Server load에서도 동작)
-
-Server load의 fetch URL은 자동 추적이 안 되지만, `depends()`로 **임의의 문자열 키**를 종속성으로 등록할 수 있다.
-
-```ts
-// src/routes/(marketing)/blog/[id]/+layout.server.ts ← Server load!
-export const load: LayoutServerLoad = async ({ fetch, depends }) => {
-  console.log('[id] layout load')
-
-  depends('blog:sidebar')  // ✅ 커스텀 종속성 키 등록
-
-  const res = await fetch('https://dummyjson.com/posts?limit=3')
-  const { posts } = await res.json()
-  return { morePosts: posts }
-}
-```
-
-#### 키 형식 규칙
-
-```ts
-depends('blog:sidebar')    // ✅ "접두사:이름" 형식
-depends('app:user')        // ✅
-depends('sidebar')         // ❌ 콜론이 없으면 에러
-```
-
-반드시 **`접두사:이름`** 형식(콜론 포함)이어야 한다.
-
-#### 페이지에서 커스텀 키로 무효화
-
-```svelte
-<!-- src/routes/(marketing)/blog/[id]/+page.svelte -->
-<script lang="ts">
-  import { invalidate } from '$app/navigation'
-  import { page } from '$app/state'
-</script>
-
-<button onclick={() => {
-  // Universal load의 fetch URL 무효화
-  invalidate(`https://dummyjson.com/posts/${page.params.id}`)
-  // Server load의 커스텀 키 무효화
-  invalidate('blog:sidebar')
-}}>
-  Reload
-</button>
-```
-
-```text
-# Reload 클릭 시
-
-# 서버 터미널 (Server load)
-[id] layout load        ← depends('blog:sidebar') 무효화
-
-# 브라우저 콘솔 (Universal load)
-[id] page load          ← fetch URL 무효화
-
-# 네트워크 탭
-├── posts/1             ← Universal load → 클라이언트에서 직접 요청
-├── comments             ← Universal load → 클라이언트에서 직접 요청
-└── __data.json         ← Server load → SvelteKit 내부 데이터 요청
-```
-
-### 무효화 방법 비교
-
-| 방법 | 대상 | Server load | Universal load | 사용 시점 |
-|------|------|:-----------:|:--------------:|----------|
-| `invalidateAll()` | 모든 활성 load | ✅ | ✅ | 전체 새로고침이 필요할 때 |
-| `invalidate(url)` | 해당 URL을 fetch한 load | ❌ | ✅ | 특정 API 응답 갱신 |
-| `invalidate(fn)` | 조건 매칭된 URL의 load | ❌ | ✅ | 패턴 기반 유연한 매칭 |
-| `invalidate(key)` | `depends(key)` 등록한 load | ✅ | ✅ | Server load 선택적 무효화 |
-
-> **핵심**: `invalidate(url)`은 Universal load 전용, `depends()` + `invalidate(key)`는 Server load에서도 동작. 대부분의 경우 `depends()`를 사용하는 것이 더 안전하고 유연하다.
-
----
-
-## 4. 실전 패턴 — 오류 복구와 선택적 무효화
-
-`invalidate()`와 `depends()`를 실제 오류 처리 시나리오에 적용하는 패턴.
-
-### 패턴 1: 오류 페이지에서 다시 시도
-
-페이지 load에서 오류가 발생하면 `+error.svelte`가 표시된다. 이때 **다시 시도 버튼**으로 해당 load만 재실행할 수 있다.
-
-#### load에 `depends()` 등록
-
-```ts
-// src/routes/(marketing)/blog/[id]/+page.server.ts
-export const load: PageServerLoad = async ({ params, fetch, depends }) => {
-  depends('blog:post')  // ✅ 커스텀 키 등록
-  console.log('[id] page load')
-
-  if (Math.random() > 0.5) {
-    throw error(500, '게시물 로드 실패')  // 무작위 오류 시뮬레이션
+  async function refresh() {
+    await invalidate('app:messages')
   }
-
-  const res = await fetch(`https://dummyjson.com/posts/${params.id}`)
-  return { post: await res.json() }
-}
-```
-
-#### 오류 페이지에서 선택적 무효화
-
-```svelte
-<!-- src/routes/(marketing)/blog/[id]/+error.svelte -->
-<script lang="ts">
-  import { invalidate } from '$app/navigation'
-  import { page } from '$app/state'
 </script>
 
-<h1>{page.error?.message}</h1>
-
-<button onclick={() => invalidate('blog:post')}>
-  Reload
-</button>
-```
-
-`invalidateAll()` 대신 `invalidate('blog:post')`를 사용하면, **오류가 발생한 페이지 load만 재실행**하고 루트 레이아웃 등 불필요한 load는 건드리지 않는다.
-
-필요에 따라 레이아웃 load도 함께 무효화할 수 있다:
-
-```svelte
-<button onclick={() => {
-  invalidate('blog:post')     // 페이지 load 재실행
-  invalidate('blog:sidebar')  // 레이아웃 load도 재실행 (네트워크 오류 시 사이드바도 실패했을 수 있음)
-}}>
-  Reload
-</button>
-```
-
-### 패턴 2: 부분 오류 — 사이드바만 실패, 페이지는 정상
-
-모든 오류가 `throw error()`로 전체 페이지를 날려야 하는 것은 아니다. **핵심이 아닌 데이터**(사이드바, 추천 목록 등)가 실패하면 오류를 던지지 않고 **빈 상태 + 재시도 버튼**을 보여주는 것이 더 나은 UX다.
-
-#### 레이아웃 load — 오류를 던지지 않고 데이터로 반환
-
-```ts
-// src/routes/(marketing)/blog/[id]/+layout.server.ts
-import type { LayoutServerLoad } from './$types'
-
-export const load: LayoutServerLoad = async ({ fetch, depends }) => {
-  depends('blog:sidebar')
-  console.log('[id] layout load')
-
-  const res = await fetch('https://dummyjson.com/posts?limit=3')
-
-  if (!res.ok) {
-    // ❌ throw error() → 전체 페이지 오류
-    // ✅ 오류 객체를 데이터로 반환 → 사이드바만 오류 표시
-    return {
-      morePosts: { error: '사이드바 게시물을 불러올 수 없습니다' }
-    }
-  }
-
-  const { posts } = await res.json()
-  return { morePosts: posts }
-}
-```
-
-> **핵심 판단**: `throw error()` vs 데이터로 반환
-> - **페이지의 핵심 데이터** 실패 → `throw error()` → `+error.svelte` 표시
-> - **부가 데이터** 실패 → 오류 객체 반환 → 해당 영역만 오류 UI 표시
-
-#### 레이아웃 UI — 조건부 렌더링 + 선택적 무효화
-
-```svelte
-<!-- src/routes/(marketing)/blog/[id]/+layout.svelte -->
-<script lang="ts">
-  import { invalidate } from '$app/navigation'
-  import type { LayoutProps } from './$types'
-
-  let { data, children }: LayoutProps = $props()
-</script>
-
-<div class="container">
-  <div class="grid">
-    <div>
-      {@render children()}
-    </div>
-
-    <aside>
-      <h2>More Posts</h2>
-      {#if 'error' in data.morePosts}
-        <!-- 오류 상태: 메시지 + 재시도 -->
-        <p>{data.morePosts.error}</p>
-        <button onclick={() => invalidate('blog:sidebar')}>
-          Reload
-        </button>
-      {:else}
-        <!-- 정상 상태: 게시물 목록 -->
-        {#each data.morePosts as post}
-          <article>
-            <h3>{post.title}</h3>
-            <p>{post.body}</p>
-          </article>
-        {/each}
-      {/if}
-    </aside>
-  </div>
-</div>
-```
-
-`invalidate('blog:sidebar')`는 **레이아웃 load만 재실행**하므로, 정상 로드된 페이지 데이터에 영향을 주지 않는다.
-
-### 오류 복구 전략 정리
-
-| 시나리오 | load 처리 | UI 처리 | 무효화 |
-|---------|----------|---------|--------|
-| **핵심 데이터 실패** (게시물 본문) | `throw error(500, msg)` | `+error.svelte` 표시 | `invalidate('blog:post')` |
-| **부가 데이터 실패** (사이드바) | `return { error: msg }` | 인라인 오류 + 재시도 버튼 | `invalidate('blog:sidebar')` |
-| **전체 새로고침** | — | 새로고침 버튼 | `invalidateAll()` |
-
-> **실무 원칙**: 오류의 중요도에 따라 `throw error()` vs 데이터 반환을 구분하고, `depends()` 키를 분리하여 **오류가 발생한 load만 정밀하게 재시도**할 수 있게 설계한다.
-
----
-
-## 5. 프리로딩 — 링크 위에 마우스를 올리면 미리 로드
-
-SvelteKit은 사용자가 링크를 **클릭하기 전에** 데이터와 코드를 미리 로드하여 체감 속도를 높일 수 있다.
-
-```text
-                     시간 축
-────────────────────────────────────────────────▶
-[호버]  [코드 + __data.json 요청]  [클릭] [즉시 표시]
-  │         │                       │
-  │         └── 완료 (캐시됨) ──────┘
-  │
-  └── data-sveltekit-preload-data="hover" 설정 시
-```
-
-### `data-sveltekit-preload-data` — 데이터 + 코드 프리로드
-
-```html
-<!-- src/app.html -->
-<body data-sveltekit-preload-data="hover">
-  %sveltekit.body%
-</body>
-```
-
-`hover`로 설정하면, 링크 위에 마우스를 **올리기만 해도** 해당 경로의 load 함수가 실행되고 코드가 로드된다. 실제 클릭 시에는 이미 데이터가 준비되어 있어 **즉시 페이지가 표시**된다.
-
-#### 옵션 값
-
-| 값 | 트리거 시점 | 설명 |
-|---|-----------|------|
-| `"hover"` | 마우스 오버 | 가장 일반적. 호버 → 클릭 사이 시간에 데이터 로드 |
-| `"tap"` | 마우스 다운 (클릭 직전) | 호버보다 늦지만, 클릭 완료 전에 로드 시작 |
-| `"off"` | 프리로드 안 함 | 클릭 후에야 로드 시작 |
-
-#### 첫 방문 vs 재방문
-
-```text
-# 첫 방문: /about에서 블로그 링크 호버
-├── +page.svelte        ← 코드 로드
-├── +page.server.ts     ← 코드 로드
-├── posts 컴포넌트       ← 코드 로드
-└── __data.json         ← 데이터 로드
-
-# 재방문: 블로그 다녀온 후 다시 호버
-└── __data.json         ← 데이터만 로드 (코드는 캐시됨)
-```
-
-코드는 한 번 로드되면 **캐시**되어 재요청하지 않는다. 데이터는 변경 가능성이 있으므로 **매번 다시 요청**한다.
-
-### 적용 범위 — 상속과 오버라이드
-
-`body`에 설정하면 앱 전체에 적용되지만, **하위 요소에서 개별 오버라이드** 가능하다.
-
-```html
-<!-- src/app.html — 앱 전체 기본값 -->
-<body data-sveltekit-preload-data="hover">
-```
-
-```svelte
-<!-- 특정 nav에서만 끄기 -->
-<nav data-sveltekit-preload-data="off">
-  <a href="/blog">Blog</a>   <!-- 프리로드 안 됨 -->
-  <a href="/about">About</a> <!-- 프리로드 안 됨 -->
-</nav>
-
-<!-- 특정 링크만 다르게 -->
-<a href="/heavy-page" data-sveltekit-preload-data="tap">Heavy Page</a>
-```
-
-부모 요소에 설정하면 **내부의 모든 `<a>` 태그에 상속**된다.
-
-### `data-sveltekit-preload-code` — 코드만 프리로드
-
-데이터는 미리 로드하지 않고 **코드(컴포넌트, load 함수)만** 미리 로드한다. 데이터가 자주 바뀌어 호버 시점에 로드하면 클릭 시점에 이미 stale할 수 있는 경우 유용.
-
-```html
-<nav data-sveltekit-preload-code="hover">
-  <a href="/blog">Blog</a>
-</nav>
-```
-
-```text
-# 블로그 링크 호버 시
-├── +page.svelte        ← ✅ 코드 로드
-├── +page.server.ts     ← ✅ 코드 로드
-└── __data.json         ← ❌ 데이터는 로드 안 됨 (클릭 시 로드)
-```
-
-#### 코드 프리로드 전용 옵션
-
-| 값 | 트리거 시점 |
-|---|-----------|
-| `"hover"` | 마우스 오버 |
-| `"tap"` | 마우스 다운 |
-| `"eager"` | 페이지 로드 시 **모든 링크**의 코드를 즉시 로드 |
-| `"viewport"` | 링크가 **뷰포트에 보이면** 코드 로드 |
-| `"off"` | 프리로드 안 함 |
-
-```html
-<!-- 페이지 내 모든 링크의 코드를 즉시 프리로드 -->
-<nav data-sveltekit-preload-code="eager">
-  <a href="/blog">Blog</a>
-  <a href="/about">About</a>
-</nav>
-
-<!-- 뷰포트에 보이는 링크만 코드 프리로드 -->
-<div data-sveltekit-preload-code="viewport">
-  {#each posts as post}
-    <a href="/blog/{post.id}">{post.title}</a>
+<button onclick={refresh}>새로고침</button>
+<ul>
+  {#each data.messages as msg}
+    <li>{msg.text}</li>
   {/each}
-</div>
+</ul>
 ```
 
-### 프로그래밍 방식 프리로드
+### 세 가지 호출 방식
 
-```ts
-import { preloadData, preloadCode } from '$app/navigation'
+```typescript
+import { invalidate } from '$app/navigation'
 
-// 데이터 + 코드 프리로드 (Promise 반환)
-await preloadData('/blog/1')
+// 1. 커스텀 키로 무효화 — depends()로 등록한 키와 매칭
+await invalidate('app:messages')
 
-// 코드만 프리로드
-await preloadCode('/blog/1')
+// 2. URL 문자열로 무효화 — 해당 URL을 fetch한 load가 재실행됨
+await invalidate('/api/messages')
+
+// 3. URL 패턴 함수로 무효화 — 조건에 맞는 URL 의존성 전체를 무효화
+await invalidate(url => url.pathname.startsWith('/api/'))
 ```
 
-`preloadData()`는 나중에 **모달로 경로 콘텐츠를 표시**하는 패턴에서 사용한다.
-
-### 기타 앵커 태그 속성
-
-| 속성 | 기본값 | 설명 |
-|------|-------|------|
-| `data-sveltekit-preload-data` | — | 데이터 + 코드 프리로드 (`hover`, `tap`, `off`) |
-| `data-sveltekit-preload-code` | — | 코드만 프리로드 (`hover`, `tap`, `eager`, `viewport`, `off`) |
-| `data-sveltekit-reload` | — | 클라이언트 라우팅 대신 **브라우저 전체 새로고침** |
-| `data-sveltekit-replacestate` | — | `history.pushState` 대신 `history.replaceState` (뒤로가기 기록 안 남김) |
-| `data-sveltekit-keepfocus` | — | 네비게이션 후 **현재 포커스 유지** (기본은 리셋) |
-| `data-sveltekit-noscroll` | — | 네비게이션 후 **스크롤 위치 유지** (기본은 최상단으로 스크롤) |
-
-> **핵심**: `data-sveltekit-preload-data="hover"`는 **거의 모든 SvelteKit 앱에서 기본 설정**으로 사용한다. `body`에 한 번 설정하고, 필요한 곳에서만 개별 오버라이드하는 패턴이 권장된다.
+방식 3은 여러 API 엔드포인트에 걸친 load를 한 번에 재실행할 때 유용하다.
 
 ---
 
-## React/Next.js 비교
+## 4. `invalidateAll()` — 모든 load 재실행
 
-| 개념 | SvelteKit | Next.js (App Router) |
-|------|-----------|---------------------|
-| 종속성 추적 | 자동 (load 내 참조 추적) | 없음 (캐시/revalidate 수동) |
-| 선택적 재실행 | 참조한 param 변경 → 해당 load만 | `revalidateTag()` / `revalidatePath()` |
-| 추적 방지 | `untrack()` | 해당 개념 없음 |
-| 전체 무효화 | `invalidateAll()` | `router.refresh()` |
-| 링크 프리로드 | `data-sveltekit-preload-data="hover"` | `<Link>` 자동 (뷰포트 진입 시) |
-| 프로그래밍 프리로드 | `preloadData()` / `preloadCode()` | `router.prefetch()` |
+현재 페이지에서 활성화된 **모든** load 함수를 재실행한다.
+
+```typescript
+import { invalidateAll } from '$app/navigation'
+
+await invalidateAll()
+```
+
+### invalidate vs invalidateAll 선택 기준
+
+```text
+invalidate(key) 사용 시나리오:
+  - 특정 데이터만 변경됨 (예: 메시지 목록)
+  - 레이아웃 load는 그대로 두고 페이지 load만 갱신
+  - 성능 최적화가 필요한 경우
+
+invalidateAll() 사용 시나리오:
+  - 어떤 load가 영향받는지 명확하지 않은 경우
+  - 사용자 인증 상태 변경 (로그인/로그아웃)
+  - 전체 페이지 데이터를 일괄 갱신해야 할 때
+```
+
+`invalidateAll()`은 편리하지만 **불필요한 네트워크 요청**을 유발할 수 있다. 레이아웃 load까지 포함하여 모든 load가 재실행되므로, 영향 범위를 알고 있다면 `invalidate()`를 우선 사용하는 것이 좋다.
+
+---
+
+## 5. Form Actions + 무효화 통합 패턴
+
+`use:enhance`를 사용한 Form Action은 제출 성공 후 **자동으로 현재 페이지의 load를 재실행**한다. 별도로 `invalidate`를 호출할 필요가 없다.
+
+```svelte
+<form method="POST" use:enhance>
+  <input name="text" />
+  <button>메시지 전송</button>
+</form>
+<!-- 전송 성공 시 현재 페이지 load 자동 재실행 -->
+```
+
+### 다른 페이지의 캐시를 무효화해야 할 때
+
+Form Action 완료 후 **다른 경로의 데이터**도 함께 갱신해야 한다면 `enhance`의 콜백에서 수동으로 처리한다.
+
+```svelte
+<script lang="ts">
+  import { enhance } from '$app/forms'
+  import { invalidate } from '$app/navigation'
+</script>
+
+<form
+  method="POST"
+  use:enhance={() => {
+    return async ({ update }) => {
+      await update()               // 현재 페이지 load 재실행 (기본 동작)
+      await invalidate('app:cart') // 다른 컴포넌트의 장바구니 데이터도 갱신
+    }
+  }}
+>
+  <button>구매</button>
+</form>
+```
+
+커스텀 fetch + `deserialize`를 쓰는 경우에는 `invalidateAll()`을 직접 호출한다.
+
+```typescript
+if (result.type === 'success') {
+  await invalidateAll()
+}
+```
+
+---
+
+## 6. 실전 패턴: 폴링 대신 무효화
+
+주기적으로 데이터를 갱신할 때 `setInterval` + 직접 fetch 대신, `invalidate()`를 이용하면 load 함수의 캐싱·에러 처리 로직을 그대로 재활용할 수 있다.
+
+```svelte
+<script lang="ts">
+  import { onMount } from 'svelte'
+  import { invalidate } from '$app/navigation'
+  import type { PageProps } from './$types'
+
+  let { data }: PageProps = $props()
+
+  onMount(() => {
+    const timer = setInterval(() => {
+      invalidate('app:messages')  // load 재실행 → data.messages 자동 업데이트
+    }, 5000)
+
+    return () => clearInterval(timer)
+  })
+</script>
+```
+
+```text
+기존 폴링 방식:
+  setInterval → fetch → 상태 수동 업데이트 → 에러 처리 직접
+
+무효화 방식:
+  setInterval → invalidate() → load 재실행 → data prop 자동 업데이트
+                                └── 에러 처리, 캐싱 → load 함수가 담당
+```
+
+> 실시간 요구 사항이 높다면 WebSocket이나 SSE(Server-Sent Events)를 사용하되, 그 이벤트 핸들러 안에서 `invalidate()`를 호출하는 패턴도 유효하다.
+
+---
+
+## React Query와 비교
+
+| 개념 | React Query | SvelteKit |
+|--|--|--|
+| 데이터 페칭 | `useQuery` | load 함수 |
+| 의존성 선언 | `queryKey` 배열 | `depends(key)` |
+| 특정 쿼리 무효화 | `queryClient.invalidateQueries({ queryKey })` | `invalidate(key)` |
+| 전체 무효화 | `queryClient.invalidateQueries()` | `invalidateAll()` |
+| 자동 재실행 조건 | 윈도우 포커스, staleTime 만료 | URL/params 변경, 상위 load 변경 |
+| 폴링 | `refetchInterval` 옵션 | `setInterval` + `invalidate()` |
+| 뮤테이션 후 갱신 | `onSuccess: () => queryClient.invalidateQueries(...)` | Form Action 자동 재실행 또는 `enhance` 콜백 |
