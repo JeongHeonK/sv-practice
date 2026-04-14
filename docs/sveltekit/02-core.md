@@ -275,6 +275,9 @@ export const actions: Actions = {
 
 ```ts
 // +page.server.ts action
+import { parse } from 'cookie'  // SvelteKit 의존성, 별도 설치 불필요
+import { fail } from '@sveltejs/kit'
+
 export const actions = {
   login: async ({ request, cookies }) => {
     // asResponse: true → 응답 객체 자체를 반환 (Set-Cookie 헤더 포함)
@@ -286,11 +289,10 @@ export const actions = {
 
     if (response.status !== 200) {
       const { message } = await response.json()
-      return message(form, message ?? '오류가 발생했습니다.', { status: 400 })
+      return fail(400, { message: message ?? '오류가 발생했습니다.' })
     }
 
     // Set-Cookie 헤더 파싱 후 SvelteKit cookies API로 직접 설정
-    import { parse } from 'cookie'  // SvelteKit 의존성, 별도 설치 불필요
     const setCookieHeader = response.headers.get('Set-Cookie')!
     const parsed = parse(setCookieHeader)
 
