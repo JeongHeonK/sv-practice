@@ -139,18 +139,16 @@ Stage 인스턴스를 자식에게 전달하기 위한 Context 캡슐화.
 
 ```ts
 // konva-context.ts
-import { setContext, getContext } from 'svelte'
+import { createContext } from 'svelte'
 import Konva from 'konva'
 
 // ── Stage Context ──
-const stageKey = Symbol('konva-stage')
+const [_getStageGetter, setStageContext] = createContext<() => Konva.Stage | undefined>()
 
-export function setStageContext(getStage: () => Konva.Stage | undefined) {
-  setContext(stageKey, getStage)   // getter 함수 전달 (비동기 초기화 대응)
-}
+export { setStageContext }
 
 export function getStageContext(): Konva.Stage {
-  const getStage = getContext<() => Konva.Stage | undefined>(stageKey)
+  const getStage = _getStageGetter()
   if (!getStage) throw new Error('Layer는 Stage의 자식이어야 합니다')
 
   const stage = getStage()
@@ -160,14 +158,12 @@ export function getStageContext(): Konva.Stage {
 }
 
 // ── Layer Context ──
-const layerKey = Symbol('konva-layer')
+const [_getLayer, setLayerContext] = createContext<Konva.Layer>()
 
-export function setLayerContext(layer: Konva.Layer) {
-  setContext(layerKey, layer)       // 인스턴스 직접 전달 (동기 생성이므로 getter 불필요)
-}
+export { setLayerContext }
 
 export function getLayerContext(): Konva.Layer {
-  const layer = getContext<Konva.Layer>(layerKey)
+  const layer = _getLayer()
   if (!layer) throw new Error('도형은 Layer의 자식이어야 합니다')
 
   return layer
