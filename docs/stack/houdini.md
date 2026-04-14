@@ -146,9 +146,9 @@ query UserList @load {
 <script lang="ts">
   import type { PageData } from './$houdini'
 
-  export let data: PageData
+  let { data }: { data: PageData } = $props()
 
-  $: ({ UserList } = data)
+  const UserList = $derived(data.UserList)
 </script>
 
 {#each $UserList.data.users as user}
@@ -167,7 +167,7 @@ query UserList @load {
 <script lang="ts">
   import { graphql } from '$houdini'
 
-  $: info = graphql(`
+  const info = graphql(`
     query UserInfo @load {
       viewer {
         firstName
@@ -178,8 +178,6 @@ query UserList @load {
 
 <p>{$info.data.viewer.firstName}</p>
 ```
-
-라우트 컴포넌트에서 inline으로 쓸 때는 반드시 `$:` 반응형 선언을 사용해야 한다.
 
 ---
 
@@ -206,9 +204,9 @@ Fragment 패턴은 **자식 컴포넌트가 자기 데이터 요구사항을 직
   import { fragment, graphql } from '$houdini'
   import type { MessageItem_message } from '$houdini'
 
-  export let message: MessageItem_message
+  let { message }: { message: MessageItem_message } = $props()
 
-  $: data = fragment(message, graphql(`
+  const data = $derived(fragment(message, graphql(`
     fragment MessageItem_message on Message {
       id
       content
@@ -218,7 +216,7 @@ Fragment 패턴은 **자식 컴포넌트가 자기 데이터 요구사항을 직
         avatar
       }
     }
-  `))
+  `)))
 </script>
 
 <article>
@@ -272,8 +270,8 @@ query MessageList @load {
   import type { PageData } from './$houdini'
   import MessageItem from '$lib/MessageItem.svelte'
 
-  export let data: PageData
-  $: ({ MessageList } = data)
+  let { data }: { data: PageData } = $props()
+  const MessageList = $derived(data.MessageList)
 </script>
 
 {#each $MessageList.data.messages as message}
@@ -433,7 +431,112 @@ query RarelyChanged @cache(policy: CacheOnly) {
 
 ---
 
-## 8. React + Apollo vs SvelteKit + Houdini 비교
+## 8. Connection Pattern — 커서 기반 페이지네이션
+
+### Connection 구조란?
+
+GraphQL에서 리스트 페이지네이션은 `edges / node / pageInfo` 구조를 사용하는 것이 표준이다.
+REST의 `?page=2` 방식(오프셋 기반)과 달리, 커서 기반은 "이 항목 이후부터" 방식으로 동작한다.
+
+```
+오프셋 기반 (REST):    ?page=2&limit=10
+커서 기반 (GraphQL):   friends(first: 10, after: "cursor_abc")
+```
+
+오프셋 방식은 중간에 항목이 추가·삭제되면 같은 항목이 중복되거나 빠질 수 있다.
+커서 방식은 특정 항목을 기준점으로 삼기 때문에 목록이 변해도 일관성이 보장된다.
+
+### Connection 스키마 구조
+
+```graphql
+type UserConnection {
+  edges: [UserEdge!]!
+  pageInfo: PageInfo!
+}
+
+type UserEdge {
+  node: User!
+  cursor: String!
+}
+
+type PageInfo {
+  hasNextPage: Boolean!
+  hasPreviousPage: Boolean!
+  startCursor: String
+  endCursor: String
+}
+```
+
+`edges`는 커서와 실제 데이터(`node`)를 함께 담는 래퍼 배열이다.
+`pageInfo`는 다음/이전 페이지 존재 여부를 알려준다.
+
+### @paginate 디렉티브
+
+Houdini에서 커서 페이지네이션은 `@paginate` 디렉티브 하나로 처리한다.
+
+```graphql
+query UserList @load {
+  friends(first: 10) @paginate {
+    edges {
+      node {
+        id
+        name
+        email
+      }
+    }
+  }
+}
+```
+
+`@paginate`를 붙이면 Houdini가 쿼리 스토어에 자동으로 메서드를 추가한다.
+
+```typescript
+// 자동 생성되는 스토어 메서드
+loadNextPage(pageCount?: number, after?: string): Promise<void>
+loadPreviousPage(pageCount?: number, before?: string): Promise<void>
+pageInfo: Readable<PageInfo>
+```
+
+### 컴포넌트 사용 패턴
+
+```svelte
+<script lang="ts">
+  import type { PageData } from './$houdini'
+
+  let { data }: { data: PageData } = $props()
+
+  const UserList = $derived(data.UserList)
+</script>
+
+{#each $UserList.data.friends.edges as { node: user }}
+  <p>{user.name} — {user.email}</p>
+{/each}
+
+{#if $UserList.pageInfo.hasNextPage}
+  <button onclick={() => UserList.loadNextPage()}>
+    더 보기
+  </button>
+{/if}
+```
+
+**동작 흐름**
+
+```
+초기 렌더링: friends(first: 10) 요청
+    → 첫 10개 항목 + pageInfo.endCursor 수신
+
+loadNextPage() 호출
+    → friends(first: 10, after: endCursor) 요청
+    → Houdini가 기존 목록에 자동 append
+    → UI 자동 갱신 (수동 상태 관리 불필요)
+```
+
+Normalized Cache 덕분에 새로 로드된 항목은 캐시에 병합되고,
+동일 항목이 다른 쿼리에 존재하면 그쪽도 함께 갱신된다.
+
+---
+
+## 9. React + Apollo vs SvelteKit + Houdini 비교
 
 | 개념 | React + Apollo | SvelteKit + Houdini |
 |------|---------------|---------------------|
