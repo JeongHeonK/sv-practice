@@ -235,6 +235,55 @@ export const load: PageLoad = async ({ parent, fetch }) => {
 
 ---
 
+## 8. Form Actions — 서버 뮤테이션
+
+`+page.server.ts`에서 `actions` 객체를 export하면 HTML `<form>`으로 서버 뮤테이션을 처리할 수 있다.
+
+### 기본 구조
+
+named actions 패턴으로 여러 액션을 한 파일에 정의한다:
+
+```text
+actions 객체 (named actions):
+  ?/create  → createMessage 처리 함수
+  ?/delete  → deleteMessage 처리 함수
+
+컴포넌트:
+  <form method="POST" action="?/create">...</form>
+  <form method="POST" action="?/delete">...</form>
+```
+
+### 반환값 — ActionData
+
+action 함수가 반환한 값은 컴포넌트에서 `form` prop으로 수신한다.
+
+```text
+ActionData 흐름:
+  action 함수 return { success, error }
+       ↓
+  컴포넌트 $props()의 form: ActionData
+       ↓
+  {#if form?.error} 에러 메시지 표시
+  {#if form?.success} 성공 처리
+```
+
+### `use:enhance` — 점진적 향상
+
+`use:enhance`를 붙이면 브라우저 기본 form submit을 인터셉트해 fetch로 처리한다.
+붙이지 않아도 동작하지만 전체 페이지 새로고침이 발생한다.
+
+```text
+use:enhance 없음:
+  form POST → 서버 액션 실행 → 전체 페이지 새로고침
+
+use:enhance 있음:
+  form submit → fetch POST → 서버 액션 실행 → 부분 업데이트
+```
+
+> load 재실행·무효화 상세 패턴 → [07-load-invalidation.md](./07-load-invalidation.md)
+
+---
+
 ## React/Next.js 비교
 
 | 개념 | Next.js (App Router) | SvelteKit |
