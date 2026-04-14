@@ -41,7 +41,7 @@ setState()                         $state 변경
 render (VDOM 생성)                 변경 배치 (microtask)
   │                                  │
   ▼                                  ▼
-DOM commit                         $effect.pre ← React에 없음
+DOM commit                         $effect.pre ← React의 useLayoutEffect와 동일
   │                                  │
   ▼                                  ▼
 useEffect cleanup                  DOM 업데이트 (세분화된 갱신)
