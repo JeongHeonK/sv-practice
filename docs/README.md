@@ -6,13 +6,14 @@ React → Svelte 전환을 위한 7일 커리큘럼 인덱스.
 
 ## 프로젝트 철학
 
-### 제로 UI (Zero-JS First)
+### 제로 UI (Zero UI)
 
-JS 없이도 form POST → Action → redirect 흐름만으로 핵심 기능이 동작한다.
-JS가 있을 때는 `use:enhance`를 추가해 페이지 새로고침 없이 UX를 강화한다 — 이것이 Progressive Enhancement다.
+브라우저 화면 없이 Claude Code 같은 AI 대화창·CLI에서도 핵심 기능을 직접 실행할 수 있어야 한다.
+온도·밝기 조절, 방문자 통계 파악 등 공간 운영 작업은 웹 UI 없이 API 호출만으로 처리 가능해야 한다.
 
-방송 운영 AI 제품은 서버 부하가 급변하고 네트워크가 불안정한 환경에서도 동작해야 한다.
-JS에 의존하지 않는 form-first 아키텍처는 그 요구에 가장 직접적으로 대응한다.
+이 원칙이 SvelteKit 설계로 이어지는 방식:
+- `+server.ts` REST 엔드포인트를 대화창에서 직접 호출 가능하게 설계
+- SvelteKit MCP 서버로 등록하면 Claude Code가 자연어로 기능을 실행
 
 ---
 
@@ -114,7 +115,7 @@ JS에 의존하지 않는 form-first 아키텍처는 그 요구에 가장 직접
 | 전역 상태 | 인스턴스 공유 → Context, 앱 전역 → 모듈 싱글턴, 복잡 로직 → 클래스 | [svelte/03-state-architecture.md](svelte/03-state-architecture.md) |
 | SvelteKit 라우팅 | `+page`, `+layout`, `+server`, `(group)`, `[[optional]]` 파일 관례 | [sveltekit/03-routing.md](sveltekit/03-routing.md) |
 | 데이터 로딩 | 공개 데이터 → `+page.ts`, 인증 필요 → `+page.server.ts`, 뮤테이션 → Actions | [sveltekit/04-loading-data.md](sveltekit/04-loading-data.md) |
-| Form Actions | `<form method="POST">` + Action + `use:enhance` = 제로 UI + Progressive Enhancement | [sveltekit/04-loading-data.md](sveltekit/04-loading-data.md) |
+| Form Actions | `+page.server.ts`의 `actions` export — 서버 뮤테이션의 기본 단위 | [sveltekit/04-loading-data.md](sveltekit/04-loading-data.md) |
 | Hooks | 인증은 `handle`, 외부 fetch 수정은 `handleFetch`, 에러 리포팅은 `handleError` | [sveltekit/06-advanced-hooks.md](sveltekit/06-advanced-hooks.md) |
 | 환경 변수 | 공개 → `$env/static/public`, 서버 전용 → `$env/static/private` | [sveltekit/08-env-server-modules.md](sveltekit/08-env-server-modules.md) |
 | Houdini | `load`에서 `graphql` 태그 함수 호출 → 캐시 자동 관리 | [stack/houdini.md](stack/houdini.md) |

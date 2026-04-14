@@ -1,6 +1,6 @@
 # 고급 패턴
 
-SvelteKit fetch, REST API 엔드포인트, 페이지네이션, Progressive Enhancement, 스트리밍, 네비게이션 훅.
+SvelteKit fetch, REST API 엔드포인트, 페이지네이션, 제로 UI, 스트리밍, 네비게이션 훅.
 
 ---
 
@@ -113,108 +113,36 @@ export const load: PageServerLoad = async ({ fetch, url }) => {
 
 ---
 
-## 4. Progressive Enhancement — JS 유무에 따른 UI 분기
+## 4. 제로 UI — 대화창 실행 가능 설계
 
-JS 없이도 동작하는 기본 기능을 먼저 만들고, JS가 있을 때 더 나은 UX로 업그레이드하는 전략. SvelteKit은 SSR 덕분에 JS 비활성화 환경에서도 HTML이 표시된다.
+**제로 UI**란 브라우저 화면 없이 Claude Code 같은 AI 대화창·CLI에서도 핵심 기능을 직접 실행할 수 있는 설계 원칙이다.
 
-### JS 비활성화 감지: `noscript` 클래스 패턴
+### 왜 중요한가
 
-`app.html`에서 `no-js` 클래스를 기본 추가, JS 활성화 시 즉시 제거:
+공간 운영 AI 제품은 브라우저를 열기 어려운 환경에서도 동작해야 한다:
+- 현장 운영자가 CLI·대화창으로 빠르게 조작
+- 자동화 파이프라인에서 UI 없이 API 직접 호출
+- Claude Code 같은 AI 에이전트가 MCP 도구로 기능 실행
 
-```html
-<!-- src/app.html -->
-<html lang="en" class="no-js">
-  <head>
-    <script>
-      document.documentElement.classList.replace('no-js', 'js')
-    </script>
-    ...
-  </head>
-</html>
-```
-
-Tailwind 커스텀 variant: `@custom-variant no-js (.no-js *);`
-
-```svelte
-<!-- JS 비활성화 시: 페이지네이션, JS 활성화 시: 더보기 버튼 -->
-<nav class="hidden no-js:flex">이전/다음 페이지네이션</nav>
-<div class="flex no-js:hidden">더 로드 버튼</div>
-```
-
-### `$derived`에 쓰기 — Svelte 5
-
-Svelte 5에서 `$derived`는 **읽기 + 쓰기 가능**하다. 초기값은 원본 데이터에서 파생되지만, 이후 직접 값을 할당할 수 있다.
-
-```ts
-let posts: Post[] = $derived(data.posts.posts)
-
-// 초기: data.posts.posts에서 파생
-// loadMorePosts() 호출 시: posts = [...posts, ...newPosts.posts] 로 직접 할당
-// URL 변경 (페이지 이동) 시: 다시 data.posts.posts에서 파생 (자동 초기화)
-```
-
-URL 파라미터에 의존하는 상태는 `$state` 대신 `$derived`로 선언해야 페이지 이동 시 올바르게 초기화된다.
-
-### "제로 UI" 철학 — JS 없이도 동작하는 UX
-
-**제로 UI**란 JavaScript가 전혀 없어도 핵심 UX가 동작하는 구현 원칙이다. SvelteKit Form Actions는 순수 HTML `<form>`을 그대로 사용하므로, JS 비활성화 환경에서도 서버 액션이 실행된다.
-
-#### 왜 중요한가
-
-방운영 AI 제품에서는 다음 환경을 전제해야 한다:
-- 불안정한 네트워크 — JS 번들 로드 실패 가능
-- 다양한 기기 — 저사양 기기에서 JS 파싱 비용이 큼
-- 접근성 요구 — 스크린 리더·보조기기 환경
-
-#### `use:enhance` 없을 때 vs 있을 때 동작 비교
+### 호출 흐름
 
 ```text
-JS 없을 때 (순수 HTML form):
-  form POST → Server Action → redirect/data 반환 → 전체 페이지 새로고침
-
-JS 있을 때 (use:enhance):
-  form submit → 인터셉트 → fetch POST → Server Action → 부분 업데이트
+Claude Code (대화창)
+    │  자연어 명령 → MCP 도구 호출 or REST 직접 호출
+    ▼
++server.ts API 엔드포인트
+    │  JSON 요청/응답
+    ▼
+DB / 실제 서비스 (온도 조절, 밝기 조절, 통계 조회 등)
 ```
 
-코드 레벨에서는 `use:enhance` 한 줄 차이다:
+### SvelteKit에서 적용하는 방식
 
-```svelte
-<!-- JS 없어도 동작 (제로 UI) -->
-<form method="POST" action="?/createMessage">
-  <input name="content" />
-  <button type="submit">전송</button>
-</form>
-```
+- `+server.ts`로 REST 엔드포인트 노출 — 브라우저와 대화창 모두에서 호출 가능
+- SvelteKit을 MCP 서버로 등록하면 Claude Code가 엔드포인트를 도구로 인식
+- 응답은 JSON 우선 설계 — UI 렌더링 없이도 의미 있는 데이터 반환
 
-```svelte
-<!-- JS 있으면 향상 (Progressive Enhancement) -->
-<script>
-  import { enhance } from '$app/forms'
-</script>
-
-<form method="POST" action="?/createMessage" use:enhance>
-  <input name="content" />
-  <button type="submit">전송</button>
-</form>
-```
-
-`use:enhance`를 인자 없이 사용하면 브라우저 기본 동작을 에뮬레이션하면서 전체 페이지 새로고침을 방지한다. JS가 없으면 브라우저가 직접 form을 POST하여 동일한 서버 액션이 실행된다.
-
-#### GraphQL mutation과 제로 UI의 경계
-
-| 방식 | JS 의존 | 제로 UI |
-|--|--|--|
-| Form Actions (`method="POST"`) | 선택적 | 가능 |
-| Houdini GraphQL mutation | 필수 | 불가 |
-
-Houdini GraphQL mutation은 JS 런타임이 필요하므로 제로 UI를 보장할 수 없다. **실무 권장 전략**:
-
-```text
-Primary:   Form Actions (제로 UI 보장)
-Enhancement: use:enhance → GraphQL mutation으로 부분 업데이트
-```
-
-JS 필수 기능의 fallback이 필요할 때는 폼 기반 action을 primary로, JS mutation을 enhancement로 배치한다.
+Form Actions와의 관계 → 브라우저 UI가 있을 때는 Form Actions로 뮤테이션, 대화창 실행 시에는 `+server.ts` REST 엔드포인트를 직접 호출한다.
 
 ---
 
@@ -368,6 +296,6 @@ afterNavigate((navigation) => {
 | 쿠키 상속 | 수동 전달 | event.fetch가 자동 상속 |
 | 네비게이션 이벤트 | `usePathname` + `useEffect` | `beforeNavigate` / `afterNavigate` |
 | 스트리밍 | `<Suspense>` + async Server Component | `await` 없이 Promise 반환 + `{#await}` |
-| Progressive Enhancement | 기본 미지원 | SSR + `no-js` 클래스 패턴 |
+| 제로 UI (API-first) | 별도 구현 필요 | `+server.ts` + MCP 서버 등록 |
 | 선택적 무효화 | `revalidateTag()` / `revalidatePath()` | `invalidate('app:tag')` |
 | 전체 무효화 | `router.refresh()` | `invalidateAll()` |
